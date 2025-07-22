@@ -858,7 +858,7 @@ struct adjacent_difference_config_tag
 
 struct adjacent_difference_config_params
 {
-    kernel_config_params          adjacent_difference_kernel_config;
+    kernel_config_params          kernel_config;
     ::rocprim::block_load_method  block_load_method;
     ::rocprim::block_store_method block_store_method;
 };
