@@ -23,6 +23,9 @@
 
 using namespace unittest;
 
+// Yes we're using 'thrust::null_type', I don't care >:(
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 template <typename T>
 struct TestTupleConstructor
 {
@@ -641,3 +644,4 @@ static_assert(
 static_assert(
   thrust::tuple_size<thrust::tuple<int, int, int, int, int, int, int, int, int, thrust::null_type>>::value == 9, "");
 static_assert(thrust::tuple_size<thrust::tuple<int, int, int, int, int, int, int, int, int, int>>::value == 10, "");
+THRUST_SUPPRESS_DEPRECATED_POP

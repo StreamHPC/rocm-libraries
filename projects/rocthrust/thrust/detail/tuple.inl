@@ -23,27 +23,8 @@
 
 THRUST_NAMESPACE_BEGIN
 
-// define null_type
-struct null_type {};
-
-// null_type comparisons
-THRUST_HOST_DEVICE inline
-bool operator==(const null_type&, const null_type&) { return true; }
-
-THRUST_HOST_DEVICE inline
-bool operator>=(const null_type&, const null_type&) { return true; }
-
-THRUST_HOST_DEVICE inline
-bool operator<=(const null_type&, const null_type&) { return true; }
-
-THRUST_HOST_DEVICE inline
-bool operator!=(const null_type&, const null_type&) { return false; }
-
-THRUST_HOST_DEVICE inline
-bool operator<(const null_type&, const null_type&) { return false; }
-
-THRUST_HOST_DEVICE inline
-bool operator>(const null_type&, const null_type&) { return false; }
+// We can ignore deprecated 'null_type' usage here. 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 // forward declaration for tuple
 template <
@@ -52,7 +33,6 @@ template <
   class T6 = null_type, class T7 = null_type, class T8 = null_type,
   class T9 = null_type>
 class tuple;
-
 
 template <size_t N, class T> struct tuple_element;
 
@@ -1004,5 +984,7 @@ inline bool operator>=(const detail::cons<T1, T2>& lhs, const detail::cons<S1, S
 
   return detail::gte(lhs, rhs);
 } // end operator>=()
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 THRUST_NAMESPACE_END
