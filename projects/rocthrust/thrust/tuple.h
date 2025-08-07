@@ -37,6 +37,39 @@
 THRUST_NAMESPACE_BEGIN
 struct THRUST_DEPRECATED_BECAUSE("Please remove null_type from parameters to tuple<...>") null_type
 {};
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
+THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&)
+{
+  return true;
+}
+
+THRUST_HOST_DEVICE inline bool operator>=(const null_type&, const null_type&)
+{
+  return true;
+}
+
+THRUST_HOST_DEVICE inline bool operator<=(const null_type&, const null_type&)
+{
+  return true;
+}
+
+THRUST_HOST_DEVICE inline bool operator!=(const null_type&, const null_type&)
+{
+  return false;
+}
+
+THRUST_HOST_DEVICE inline bool operator<(const null_type&, const null_type&)
+{
+  return false;
+}
+
+THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
+{
+  return false;
+}
+THRUST_SUPPRESS_DEPRECATED_POP
+
 THRUST_NAMESPACE_END
 
 // If 'libcudacxx' or 'libhipcxx' is available (_THRUST_HAS_DEVICE_SYSTEM_STD), we will
@@ -780,42 +813,7 @@ _THRUST_STD_NAMESPACE_END
 
 #endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
-// 'null_type'-padded tuples are deprecated, but we still need to support it... for now.
 THRUST_SUPPRESS_DEPRECATED_PUSH
-THRUST_NAMESPACE_BEGIN
-
-THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator>=(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator<=(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator!=(const null_type&, const null_type&)
-{
-  return false;
-}
-
-THRUST_HOST_DEVICE inline bool operator<(const null_type&, const null_type&)
-{
-  return false;
-}
-
-THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
-{
-  return false;
-}
-
-THRUST_NAMESPACE_END
-
 _THRUST_STD_NAMESPACE_BEGIN
 
 template <>
