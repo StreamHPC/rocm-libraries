@@ -38,6 +38,7 @@ int main(int argc, char* argv[])
     benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
 
 #ifndef BENCHMARK_CONFIG_TUNING
+    CREATE_RADIX_SORT_BENCHMARK(double)
     CREATE_RADIX_SORT_BENCHMARK(int)
     CREATE_RADIX_SORT_BENCHMARK(float)
     CREATE_RADIX_SORT_BENCHMARK(long long)
