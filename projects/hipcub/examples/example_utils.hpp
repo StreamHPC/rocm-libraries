@@ -34,9 +34,8 @@
 #include <sstream>
 #include <iostream>
 
-#include <hipcub/util_type.hpp>
 #include <hipcub/util_allocator.hpp>
-#include <hipcub/iterator/discard_output_iterator.hpp>
+#include <hipcub/util_type.hpp>
 
 #define AssertEquals(a, b) if ((a) != (b)) { std::cerr << "\n(" << __FILE__ << ": " << __LINE__ << ")\n"; exit(1);}
 
