@@ -74,8 +74,8 @@ struct CommandLineArgs
     std::vector<std::string>    args;
     hipDeviceProp_t             deviceProp;
     float                       device_giga_bandwidth;
-    std::size_t                 device_free_physmem;
-    std::size_t                 device_total_physmem;
+    size_t                      device_free_physmem;
+    size_t                      device_total_physmem;
 
     /**
      * Constructor
@@ -123,7 +123,7 @@ struct CommandLineArgs
     {
         using namespace std;
 
-        for (std::size_t i = 0; i < keys.size(); ++i)
+        for(size_t i = 0; i < keys.size(); ++i)
         {
             if (keys[i] == string(arg_name))
                 return true;
@@ -145,8 +145,8 @@ struct CommandLineArgs
     /**
      * Returns the commandline parameter for a given index (not including flags)
      */
-    template <typename T>
-    void GetCmdLineArgument(std::size_t index, T &val)
+    template<typename T>
+    void GetCmdLineArgument(size_t index, T& val)
     {
         using namespace std;
         if (index < args.size()) {
@@ -163,7 +163,7 @@ struct CommandLineArgs
     {
         using namespace std;
 
-        for (std::size_t i = 0; i < keys.size(); ++i)
+        for(size_t i = 0; i < keys.size(); ++i)
         {
             if (keys[i] == string(arg_name))
             {
@@ -188,7 +188,7 @@ struct CommandLineArgs
             vals.clear();
 
             // Recover from multi-value string
-            for (std::size_t i = 0; i < keys.size(); ++i)
+            for(size_t i = 0; i < keys.size(); ++i)
             {
                 if (keys[i] == string(arg_name))
                 {
@@ -383,7 +383,6 @@ int CompareResults(double* computed, double* reference, OffsetT len, bool verbos
     return 0;
 }
 
-
 // /**
 //  * Verify the contents of a device array match those
 //  * of a host array
@@ -391,7 +390,7 @@ int CompareResults(double* computed, double* reference, OffsetT len, bool verbos
 // int CompareDeviceResults(
 //     hipcub::NullType */* h_reference */,
 //     hipcub::NullType */* d_data */,
-//     std::size_t /* num_items */,
+//     size_t /* num_items */,
 //     bool /* verbose */ = true,
 //     bool /* display_data */ = false)
 // {
@@ -406,7 +405,7 @@ int CompareResults(double* computed, double* reference, OffsetT len, bool verbos
 // int CompareDeviceResults(
 //     S *h_reference,
 //     rocprim::discard_iterator d_data,
-//     std::size_t num_items,
+//     size_t num_items,
 //     bool verbose = true,
 //     bool display_data = false)
 // {
@@ -417,13 +416,9 @@ int CompareResults(double* computed, double* reference, OffsetT len, bool verbos
  * Verify the contents of a device array match those
  * of a host array
  */
-template <typename S, typename T>
+template<typename S, typename T>
 int CompareDeviceResults(
-    S *h_reference,
-    T *d_data,
-    std::size_t num_items,
-    bool verbose = true,
-    bool display_data = false)
+    S* h_reference, T* d_data, size_t num_items, bool verbose = true, bool display_data = false)
 {
     // Allocate array on host
     T *h_data = (T*) malloc(num_items * sizeof(T));
@@ -435,12 +430,12 @@ int CompareDeviceResults(
     if (display_data)
     {
         printf("Reference:\n");
-        for (std::size_t i = 0; i < num_items; i++)
+        for(size_t i = 0; i < num_items; i++)
         {
             std::cout << CoutCast(h_reference[i]) << ", ";
         }
         printf("\n\nComputed:\n");
-        for (std::size_t i = 0; i < num_items; i++)
+        for(size_t i = 0; i < num_items; i++)
         {
             std::cout << CoutCast(h_data[i]) << ", ";
         }
@@ -461,13 +456,9 @@ int CompareDeviceResults(
  * Verify the contents of a device array match those
  * of a device array
  */
-template <typename T>
+template<typename T>
 int CompareDeviceDeviceResults(
-    T *d_reference,
-    T *d_data,
-    std::size_t num_items,
-    bool verbose = true,
-    bool display_data = false)
+    T* d_reference, T* d_data, size_t num_items, bool verbose = true, bool display_data = false)
 {
     // Allocate array on host
     T *h_reference = (T*) malloc(num_items * sizeof(T));
@@ -480,12 +471,12 @@ int CompareDeviceDeviceResults(
     // Display data
     if (display_data) {
         printf("Reference:\n");
-        for (std::size_t i = 0; i < num_items; i++)
+        for(size_t i = 0; i < num_items; i++)
         {
             std::cout << CoutCast(h_reference[i]) << ", ";
         }
         printf("\n\nComputed:\n");
-        for (std::size_t i = 0; i < num_items; i++)
+        for(size_t i = 0; i < num_items; i++)
         {
             std::cout << CoutCast(h_data[i]) << ", ";
         }
@@ -505,13 +496,11 @@ int CompareDeviceDeviceResults(
 /**
  * Print the contents of a host array
  */
-template <typename InputIteratorT>
-void DisplayResults(
-    InputIteratorT h_data,
-    std::size_t num_items)
+template<typename InputIteratorT>
+void DisplayResults(InputIteratorT h_data, size_t num_items)
 {
     // Display data
-    for (std::size_t i = 0; i < num_items; i++)
+    for(size_t i = 0; i < num_items; i++)
     {
         std::cout << CoutCast(h_data[i]) << ", ";
     }
