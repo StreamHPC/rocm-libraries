@@ -2,7 +2,19 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM x.y.z for ROCm 8.0
+## rocPRIM 5.0.0 for ROCm 8.0
+
+### Added
+
+* Added C++ 17 style type_traits utilities
+ * is_floating_point_v
+ * is_integral_v
+ * is_arithmetic_v
+ * is_fundamental_v
+ * is_unsigned_v
+ * is_signed_v
+ * is_scalar_v
+ * is_compound_v
 
 ### Optimizations
 
