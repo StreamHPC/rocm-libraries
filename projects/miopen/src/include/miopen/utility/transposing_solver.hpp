@@ -3,9 +3,14 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cassert>
+#include <functional>
+#include <limits>
 #include <miopen/datatype.hpp>
 #include <miopen/subbuffers.hpp>
 #include <miopen/tensor_layout.hpp>
+#include <numeric>
 
 namespace miopen {
 namespace solver {
@@ -152,10 +157,10 @@ struct UniversalTransposeSolver : TransposePseudoSolver
     {
         auto sln = ConvSolution{};
 
-        {
+        auto create_construction_params = [&](const std::string& index_type) {
             const auto tensor_space = problem.input.GetElementSize();
             const auto cus          = ctx.GetStream().GetMaxComputeUnits();
-            const auto build_params = GetDataTypeKBP(problem.input.GetType());
+            auto build_params       = GetDataTypeKBP(problem.input.GetType());
 
             constexpr std::size_t max_block_size = 256;
             const auto local_size                = max_block_size;
@@ -164,6 +169,8 @@ struct UniversalTransposeSolver : TransposePseudoSolver
             const auto capped_blocks = std::min<std::size_t>(num_blocks, cus * 4);
             const auto global_size   = capped_blocks * local_size;
 
+            build_params.Define("INDEX_TYPE", index_type);
+
             auto transposeKernel = KernelInfo{};
             transposeKernel.g_wk = {global_size, 1, 1};
             transposeKernel.l_wk = {local_size, 1, 1};
@@ -171,26 +178,47 @@ struct UniversalTransposeSolver : TransposePseudoSolver
             transposeKernel.kernel_file  = "UniversalTranspose.cpp";
             transposeKernel.kernel_name  = "UniversalTranspose";
             transposeKernel.comp_options = build_params.GenerateFor(kbp::HIP{});
-
-            sln.construction_params.emplace_back(std::move(transposeKernel));
-        }
+            return transposeKernel;
+        };
+        sln.construction_params.emplace_back(create_construction_params("uint32_t"));
+        sln.construction_params.emplace_back(create_construction_params("uint64_t"));
 
         sln.invoker_factory = [](const std::vector<Kernel>& kernels) {
-            const auto kernel = kernels.front();
-            return [kernel](const Handle& handle, const AnyInvokeParams& any_params) {
-                const auto& params      = any_params.CastTo<TransposeInvokeParams>();
-                const auto& lens        = GetNCDHW<uint64_t>(params.in_desc.GetLengths());
-                const auto& in_strides  = GetNCDHW<uint64_t>(params.in_desc.GetStrides());
-                const auto& out_strides = GetNCDHW<uint64_t>(params.out_desc.GetStrides());
+            return [kernels](const Handle& handle, const AnyInvokeParams& any_params) {
+                const auto& params = any_params.CastTo<TransposeInvokeParams>();
 
-                // clang-format off
-                handle.Run(kernel)(
-                    params.in, params.out,
-                    lens[0],        lens[1],        lens[2],        lens[3],        lens[4],
-                    in_strides[0],  in_strides[1],  in_strides[2],  in_strides[3],  in_strides[4],
-                    out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4]
-                );
-                // clang-format on
+                uint64_t max_index =
+                    std::max(params.in_desc.GetElementSpace(), params.out_desc.GetElementSpace());
+                if(max_index <= std::numeric_limits<uint32_t>::max())
+                {
+                    const auto& lens        = GetNCDHW<uint32_t>(params.in_desc.GetLengths());
+                    const auto& in_strides  = GetNCDHW<uint32_t>(params.in_desc.GetStrides());
+                    const auto& out_strides = GetNCDHW<uint32_t>(params.out_desc.GetStrides());
+
+                    // clang-format off
+                    handle.Run(kernels[0])(
+                        params.in, params.out,
+                        lens[0],        lens[1],        lens[2],        lens[3],        lens[4],
+                        in_strides[0],  in_strides[1],  in_strides[2],  in_strides[3],  in_strides[4],
+                        out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4]
+                    );
+                    // clang-format on
+                }
+                else
+                {
+                    const auto& lens        = GetNCDHW<uint64_t>(params.in_desc.GetLengths());
+                    const auto& in_strides  = GetNCDHW<uint64_t>(params.in_desc.GetStrides());
+                    const auto& out_strides = GetNCDHW<uint64_t>(params.out_desc.GetStrides());
+
+                    // clang-format off
+                    handle.Run(kernels[1])(
+                        params.in, params.out,
+                        lens[0],        lens[1],        lens[2],        lens[3],        lens[4],
+                        in_strides[0],  in_strides[1],  in_strides[2],  in_strides[3],  in_strides[4],
+                        out_strides[0], out_strides[1], out_strides[2], out_strides[3], out_strides[4]
+                    );
+                    // clang-format on
+                }
             };
         };
 
