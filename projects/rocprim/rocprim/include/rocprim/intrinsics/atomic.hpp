@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -356,6 +356,25 @@ namespace detail
 #undef ROCPRIM_ATOMIC_STORE_GLOBAL
     }
 
+    /// \brief Do not allow vmem operations to be reordered during instruction scheduling
+    ///
+    /// This ensures that previous vector memory operations are emitted before the memory operations
+    /// after this barrier.
+    ///
+    /// This is a dangerous internal function not meant for users, and only meant to be used by
+    /// developers that know what they are doing.
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void vmem_sched_barrier()
+    {
+        // Avoid vmem instructions being scheduled across the sched barrier:
+        // * 0x0010: All VMEM instructions may be scheduled across sched_barrier.
+        // * 0x0020: VMEM read instructions may be scheduled across sched_barrier.
+        // * 0x0040: VMEM write instructions may be scheduled across sched_barrier.
+        constexpr int mask
+            = 0x0 + 0x1 + 0x2 + 0x4 + 0x8 + /*0x10 + 0x20 + 0x40*/ +0x80 + 0x100 + 0x200;
+        __builtin_amdgcn_sched_barrier(mask);
+    }
+
     /// \brief Wait for all vector memory operations to complete
     ///
     /// This ensures that previous visible writes to vector memory have completed before the function
@@ -369,7 +388,7 @@ namespace detail
     /// developers that know what they are doing.
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_release_vmem_order_only()
     {
-        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+        vmem_sched_barrier();
         // Wait until all vmem operations complete (s_waitcnt vmcnt(0))
         __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4) | (/*lgkmcnt*/ 0xf << 8));
     }
@@ -386,7 +405,7 @@ namespace detail
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_acquire_order_only()
     {
         __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4) | (/*lgkmcnt*/ 0xf << 8));
-        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+        vmem_sched_barrier();
     }
 }
 
