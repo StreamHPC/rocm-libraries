@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -67,7 +67,16 @@ endfunction()
 # We'll use this small program to detect available GPUs and build the resource JSON file.
 set(GEN_RES_SPEC_PATH ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
 add_executable(generate_resource_spec ${GEN_RES_SPEC_PATH})
-set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+set_target_properties(generate_resource_spec
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+if(HIP_COMPILER STREQUAL "nvcc")
+    set_source_files_properties(${GEN_RES_SPEC_PATH}
+        PROPERTIES LANGUAGE CUDA)
+endif()
+
+target_compile_options(generate_resource_spec PRIVATE -Wno-unused-command-line-argument)
 target_link_libraries(generate_resource_spec PRIVATE hip::host)
 
 # hipCUB tests
