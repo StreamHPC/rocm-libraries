@@ -35,10 +35,12 @@
 // certain condition. But now, these template will not be compiled before
 // calling them.
 // #include "batchnorm_functions.hpp"
+
 namespace miopen {
 namespace reduction {
 
 namespace detail {
+
 template <int N>
 struct log2_floor
 {
@@ -62,6 +64,16 @@ constexpr static int log2_ceil_v = log2_ceil<N>::value;
 
 } // namespace detail
 
+template <typename FloatAccum>
+__forceinline__ __device__ void warp_reduce_sum2(FloatAccum& x, FloatAccum& y)
+{
+    for(int offset = warpSize / 2; offset > 0; offset >>= 1)
+    {
+        x += __shfl_down(x, offset);
+        y += __shfl_down(y, offset);
+    }
+}
+
 template <typename FloatAccum, unsigned int SizeLclData>
 __forceinline__ __device__ void lds_reduce2(FloatAccum& x,
                                             FloatAccum& y,
@@ -70,21 +82,35 @@ __forceinline__ __device__ void lds_reduce2(FloatAccum& x,
                                             FloatAccum (&lcl_data_y)[SizeLclData],
                                             unsigned int lid)
 {
-    lcl_data_x[lid] = x;
-    lcl_data_y[lid] = y;
-    __syncthreads();
-    for(unsigned int red = (1 << detail::log2_ceil_v<SizeLclData>) >> 1; red > 0; red >>= 1)
-    {
-        if(lid < red && lid + red < SizeLclData)
-        {
-            lcl_data_x[lid] += lcl_data_x[lid + red];
-            lcl_data_y[lid] += lcl_data_y[lid + red];
-        }
-        __syncthreads();
-    }
+    warp_reduce_sum2(x, y);
 
-    x = lcl_data_x[0] * scale;
-    y = lcl_data_y[0] * scale;
+    const unsigned int warp_id   = lid / warpSize;
+    const unsigned int lane_id   = lid % warpSize;
+    const unsigned int num_warps = (SizeLclData + warpSize - 1) / warpSize;
+
+    if(lane_id == 0)
+    {
+        lcl_data_x[warp_id] = x;
+        lcl_data_y[warp_id] = y;
+    }
+    __syncthreads();
+
+    if(warp_id == 0)
+    {
+        x = (lane_id < num_warps) ? lcl_data_x[lane_id] : FloatAccum(0);
+        y = (lane_id < num_warps) ? lcl_data_y[lane_id] : FloatAccum(0);
+        warp_reduce_sum2(x, y);
+
+        if(lane_id == 0)
+        {
+            lcl_data_x[0] = x * scale;
+            lcl_data_y[0] = y * scale;
+        }
+    }
+    __syncthreads();
+
+    x = lcl_data_x[0];
+    y = lcl_data_y[0];
 }
 
 template <typename FloatAccumC, typename FloatAccum, unsigned int SizeLclData>
@@ -156,27 +182,42 @@ __forceinline__ __device__ void gcn_reduce2(FloatAccum& x,
                                             FloatAccum (&lcl_data_y)[SizeLclData],
                                             unsigned int lid)
 {
-    const unsigned int ldsidx = lid >> 6;
+    const unsigned int ldsidx       = lid >> 6;
+    const unsigned int lane_in_wave = lid & 63;
+
     dpp_interleaved_reduction(x, y);
-    // Last thread
-    if((lid % 64) == 63)
+
+    // Last thread in each wavefront stores result
+    if(lane_in_wave == 63)
     {
         lcl_data_x[ldsidx] = x;
         lcl_data_y[ldsidx] = y;
     }
-
     __syncthreads();
 
-    x = y = 0;
+    // First wavefront reduces across all wavefront results using warp shuffles
+    if(ldsidx == 0)
+    {
+        x = (lane_in_wave < SizeLclData) ? lcl_data_x[lane_in_wave] : FloatAccum(0);
+        y = (lane_in_wave < SizeLclData) ? lcl_data_y[lane_in_wave] : FloatAccum(0);
 
-    // This could be changed to clang loop unroll(full), because the size is small
-    static_unroll_count<unsigned int, 0, SizeLclData, 1, 2>{[&](unsigned int i) {
-        x += lcl_data_x[i];
-        y += lcl_data_y[i];
-    }};
+        // Parallel reduction within first wavefront
+        for(unsigned int offset = 32; offset > 0; offset >>= 1)
+        {
+            x += __shfl_down(x, offset);
+            y += __shfl_down(y, offset);
+        }
 
-    x *= scale;
-    y *= scale;
+        if(lane_in_wave == 0)
+        {
+            lcl_data_x[0] = x * scale;
+            lcl_data_y[0] = y * scale;
+        }
+    }
+    __syncthreads();
+
+    x = lcl_data_x[0];
+    y = lcl_data_y[0];
 }
 
 } // namespace reduction
