@@ -101,8 +101,11 @@ public:
                                                                stream));
     }
 
-    template<typename InputIteratorT, typename ExtremumOutIteratorT, typename IndexOutIteratorT, typename NumItemsT>
-HIPCUB_RUNTIME_FUNCTION
+    template<typename InputIteratorT,
+             typename ExtremumOutIteratorT,
+             typename IndexOutIteratorT,
+             typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION
     static hipError_t ArgMin(void*                d_temp_storage,
                              size_t&              temp_storage_bytes,
                              InputIteratorT       d_in,
@@ -216,7 +219,10 @@ HIPCUB_RUNTIME_FUNCTION
                                                                stream));
     }
 
-    template<typename InputIteratorT, typename ExtremumOutIteratorT, typename IndexOutIteratorT, typename NumItemsT>
+    template<typename InputIteratorT,
+             typename ExtremumOutIteratorT,
+             typename IndexOutIteratorT,
+             typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ArgMax(void*                d_temp_storage,
                              size_t&              temp_storage_bytes,
