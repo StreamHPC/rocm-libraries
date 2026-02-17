@@ -567,17 +567,39 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
 
     size_t xlocalsize_default = 0;
     size_t ylocalsize_default = 0;
-    size_t vectorsize_default = 4;
+    size_t vectorsize_default = 8;
     size_t zlocalsize_default = 1;
     size_t nelements_default  = n;
 
     // Tuning instances: add the full parameter space
     if(problem.IsLayoutNHWC())
     {
-        // First add the default instance, which should work well for a large range of problems
+        // Use heuristics to determine the best vectorsize for NHWC
+        {
+            size_t xlocalsize_tmp = 64;
+            GetHeuristicsConfigTuningNHWC(problem, vectorsize_default, xlocalsize_tmp);
+            while(c % vectorsize_default != 0 && vectorsize_default > 1)
+            {
+                vectorsize_default >>= 1;
+            }
+        }
+
+        // First add the default instance, trying decreasing vectorsizes until one is applicable
         {
             GetSpatialMultipleConfig(
                 problem, vectorsize_default, xlocalsize_default, ylocalsize_default);
+            while(!IsSpatialMultipleApplicable(problem,
+                                               vectorsize_default,
+                                               stash_values,
+                                               ylocalsize_default,
+                                               zlocalsize_default,
+                                               nelements_default) &&
+                  vectorsize_default > 1)
+            {
+                vectorsize_default >>= 1;
+                GetSpatialMultipleConfig(
+                    problem, vectorsize_default, xlocalsize_default, ylocalsize_default);
+            }
             if(IsSpatialMultipleApplicable(problem,
                                            vectorsize_default,
                                            stash_values,
@@ -591,30 +613,6 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
                                                                ylocalsize_default,
                                                                zlocalsize_default,
                                                                nelements_default));
-            }
-            else
-            {
-                if(vectorsize_default > 1)
-                {
-                    vectorsize_default = 1;
-                    GetSpatialMultipleConfig(
-                        problem, vectorsize_default, xlocalsize_default, ylocalsize_default);
-
-                    if(IsSpatialMultipleApplicable(problem,
-                                                   1,
-                                                   stash_values,
-                                                   ylocalsize_default,
-                                                   zlocalsize_default,
-                                                   nelements_default))
-                    {
-                        valid_kernels.push_back(GetKernelIdFromVariant(2,
-                                                                       vectorsize_default,
-                                                                       xlocalsize_default,
-                                                                       ylocalsize_default,
-                                                                       zlocalsize_default,
-                                                                       nelements_default));
-                    }
-                }
             }
         }
 
