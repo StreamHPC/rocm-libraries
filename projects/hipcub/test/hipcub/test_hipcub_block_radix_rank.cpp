@@ -615,13 +615,28 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
 
     hipcub::StoreDirectBlocked(lid, ranks_output + block_offset, ranks);
 
-    const size_t pfs_size       = (1 << RadixBits);
-    const size_t pfs_offset     = (blockIdx.x * pfs_size) + (threadIdx.x * bins_tracked_per_thread);
+    const size_t pfs_size   = (1 << RadixBits);
+    const size_t pfs_offset = (blockIdx.x * pfs_size);
 
     for(size_t i = 0; i < bins_tracked_per_thread; i++)
     {
-        if((threadIdx.x * bins_tracked_per_thread) + i < pfs_size)
-            prefix_sum_output[pfs_offset + i] = prefix_sum_storage[i];
+        const size_t local_bin = threadIdx.x * bins_tracked_per_thread + i;
+        if(local_bin >= pfs_size)
+            continue;
+
+#if defined(__HIP_PLATFORM_NVIDIA__)
+        if constexpr(std::is_same_v<KeyType, unsigned long long> && Descending)
+        {
+            // Make CUB's layout match rocPRIM's: flip the global bin index
+            const size_t mirrored_bin                    = pfs_size - 1 - local_bin;
+            prefix_sum_output[pfs_offset + mirrored_bin] = prefix_sum_storage[i];
+        }
+        else
+#endif
+        {
+            // Normal (rocPRIM-compatible) layout
+            prefix_sum_output[pfs_offset + local_bin] = prefix_sum_storage[i];
+        }
     }
 }
 
@@ -796,14 +811,14 @@ void test_radix_rank_with_prefix_sum_output()
                                 d_prefix_sum_output,
                                 prefix_sum_output.size() * sizeof(int),
                                 hipMemcpyDeviceToHost));
-            // Verifying results (ranks)
+
+            // Verifying results
             for(size_t i = 0; i < size; i++)
             {
                 SCOPED_TRACE(testing::Message() << "with index= " << i);
                 ASSERT_EQ(ranks_output[i], expected[i]);
             }
 
-            // Now verify prefix sums per block
             for(size_t block = 0; block < grid_size; ++block)
             {
                 const size_t block_pfs_offset = block * pfs_items_per_block;
@@ -811,20 +826,7 @@ void test_radix_rank_with_prefix_sum_output()
                 for(size_t bin = 0; bin < pfs_items_per_block; ++bin)
                 {
                     const size_t idx = block_pfs_offset + bin;
-
-#if defined(__HIP_PLATFORM_NVIDIA__)
-                    if constexpr(std::is_same_v<key_type, unsigned long long> && descending)
-                    {
-                        // CUB stores prefix for flipped bin at unflipped index
-                        const size_t mirrored_bin = pfs_items_per_block - 1 - bin;
-                        ASSERT_EQ(prefix_sum_output[idx],
-                                  pfs_expected[block_pfs_offset + mirrored_bin]);
-                    }
-                    else
-#endif
-                    {
-                        ASSERT_EQ(prefix_sum_output[idx], pfs_expected[idx]);
-                    }
+                    ASSERT_EQ(prefix_sum_output[idx], pfs_expected[idx]);
                 }
             }
         }
