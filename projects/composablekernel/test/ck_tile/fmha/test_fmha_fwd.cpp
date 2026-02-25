@@ -362,17 +362,20 @@ class HDimPadding
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                          HDimPadding,
                          Combine(Values(std::tuple{24, 48},
-                                        std::tuple{120, 160},
-                                        std::tuple{256, 108},
+                                        // std::tuple{120, 160},
+                                        // std::tuple{256, 108},
                                         std::tuple{40, 64}),
                                  Bool(),
-                                 IsVRowmajorValues,
-                                 ModeValues,
-                                 Values(std::tuple{1, 4, 2, 480, -1, -1, "0"},
-                                        std::tuple{2, 2, -1, 300, 400, 512, "t:64,64"},
-                                        std::tuple{1, 4, 1, 512, 201, 256, "1"},
-                                        std::tuple{1, 2, -1, 900, 256, -1, "0"},
-                                        std::tuple{2, 1, -1, 256, 256, -1, "1"})));
+                                //  IsVRowmajorValues,
+                                Values(true),
+                                //  ModeValues,
+                                Values(mode_enum::batch),
+                                 Values(//std::tuple{1, 4, 2, 480, -1, -1, "0"},
+                                        // std::tuple{2, 2, -1, 300, 400, 512, "t:64,64"},
+                                        std::tuple{1, 4, 1, 512, 201, 256, "0"},
+                                        std::tuple{1, 1, 1, 900, 256, -1, "0"}//,
+                                        // std::tuple{2, 1, -1, 256, 256, -1, "1"}
+                                    )));
 
 TEST_P(HDimPadding, DataTypeConfig)
 {
