@@ -84,13 +84,11 @@ struct BlockFmhaPipelineQRKSVSAsync
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
-    static constexpr index_t kAlignmentQ = kPadHeadDimQ ? numeric_traits<QDataType>::PackedSize
-                                                        : Policy::template GetAlignmentQ<Problem>();
-    static constexpr index_t kAlignmentK = kPadHeadDimQ ? numeric_traits<KDataType>::PackedSize
-                                                        : Policy::template GetAlignmentK<Problem>();
+    static constexpr index_t kAlignmentQ = Policy::template GetAlignmentQ<Problem>();
+    static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
     static constexpr index_t kAlignmentV = []() {
         if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
-            return kPadHeadDimV ? 1 : Policy::template GetAlignmentV<Problem>();
+            return Policy::template GetAlignmentV<Problem>();
         else
             return kPadSeqLenK ? numeric_traits<VDataType>::PackedSize
                                : Policy::template GetAlignmentV<Problem>();
@@ -258,7 +256,6 @@ struct BlockFmhaPipelineQRKSVSAsync
                           kK1 == VScaleDramBlockWindowTmp{}.get_window_lengths()[number<1>{}] *
                                      kVScaleGranularity);
         }
-        static_assert(QScaleEnum != BlockAttentionQuantScaleEnum::MX);
 
         constexpr auto LdsSeq = Policy::template GetLdsBufferSequence<Problem>();
 
