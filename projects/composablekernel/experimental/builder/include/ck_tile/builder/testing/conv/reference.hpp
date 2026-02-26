@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ck_tile/builder/conv_signature_concepts.hpp"
 #include "ck_tile/builder/testing/testing.hpp"
 #include "ck/library/utility/convolution_parameter.hpp"
 #include <stdexcept>
@@ -69,13 +70,19 @@ run(RefConvInstance<SIGNATURE, InDataType, WeiDataType, OutDataType> auto& conv,
     // eventually.
 
     if(!args.make_input_descriptor().is_packed())
+    {
         return RunResult::not_supported("TODO: Support non-packed input tensor in reference conv");
+    }
 
     if(!args.make_weight_descriptor().is_packed())
+    {
         return RunResult::not_supported("TODO: Support non-packed weight tensor in reference conv");
+    }
 
     if(!args.make_output_descriptor().is_packed())
+    {
         return RunResult::not_supported("TODO: Support non-packed output tensor in reference conv");
+    }
 
     conv.Run(input, weight, output, param);
     return RunResult::from_runtime(0); // ref conv does not return a meaningful runtime.
@@ -118,7 +125,7 @@ concept RefConvBwdWeightInstance =
     detail::RefConvInstance<Conv, SIGNATURE, const void*, void*, const void*> &&
     ConvDirectionIsBackwardWeight<SIGNATURE>;
 
-/// @brief `run()` specialization for forward convolution and the reference
+/// @brief `run()` specialization for backward weight convolution and the reference
 /// backward weight implementation.
 ///
 /// @tparam SIGNATURE The signature of the operation to perform. Must be backwards weight.
@@ -132,6 +139,34 @@ template <auto SIGNATURE>
                             const Outputs<SIGNATURE>& outputs)
 {
     return detail::run(conv, args, inputs.input, outputs.weight, inputs.output);
+}
+
+/// @brief Concept for checking whether this is the reference convolution
+/// backward data implementation.
+template <typename Conv, auto SIGNATURE>
+concept RefConvBwdDataInstance =
+    detail::RefConvInstance<Conv, SIGNATURE, const void*, void*, const void*> &&
+    ConvDirectionIsBackwardData<SIGNATURE>;
+
+/// @brief `run()` specialization for backward data convolution and the reference
+/// backward data implementation.
+///
+/// @tparam SIGNATURE The signature of the operation to perform. Must be backwards data.
+/// @returns RunResult about how the operation completed (or not).
+///
+/// @see run()
+template <auto SIGNATURE>
+[[nodiscard]] RunResult run(RefConvBwdDataInstance<SIGNATURE> auto& conv,
+                            const Args<SIGNATURE>& args,
+                            const Inputs<SIGNATURE>& inputs,
+                            const Outputs<SIGNATURE>& outputs)
+{
+    if(false)
+    {
+        return {};
+    }
+    // For backward-data the reference expects (dX, W, dY)
+    return detail::run(conv, args, outputs.input, inputs.weight, inputs.output);
 }
 
 } // namespace ck_tile::builder::test

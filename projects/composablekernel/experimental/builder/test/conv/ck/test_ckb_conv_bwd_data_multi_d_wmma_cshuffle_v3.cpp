@@ -5,6 +5,9 @@
 #include "utils/ckb_conv_test_utils.hpp"
 #include "utils/conv_algorithm_type_utils.hpp"
 #include "ck_tile/host/device_prop.hpp"
+#include "ck_tile/builder/testing/conv/bwd_data.hpp"
+#include "ck_tile/builder/testing/conv/reference.hpp"
+#include "testing_utils.hpp"
 
 namespace ckb = ck_tile::builder;
 namespace ckt = ck_tile::builder::test;
@@ -32,6 +35,8 @@ constexpr auto ALGORITHM = cku::ConvAlgorithm_DeviceGroupedConvBwdDataMultipleD_
 using Builder  = ckb::ConvBuilder<SIGNATURE, ALGORITHM>;
 using Instance = Builder::Instance;
 
+using Reference = ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
+
 TEST(BwdData_2DFp16_MultiD_Wmma_CShuffle_V3_GNHWC, Create)
 {
     const auto expected_transfer_parameters = to_string(ALGORITHM);
@@ -43,3 +48,40 @@ TEST(BwdData_2DFp16_MultiD_Wmma_CShuffle_V3_GNHWC, Create)
                             "PassThrough,PassThrough,PassThrough",
                             "fp16,fp16"}); // check compute types
 }
+
+// TEST(BwdData_2DFp16_MultiD_Wmma_CShuffle_V3_GNHWC, Exec)
+// {
+//     ckt::Args<SIGNATURE> args = {
+//         .lengths =
+//             {
+//                 .batch_size      = 2,
+//                 .groups          = 4,
+//                 .input_channels  = 32,
+//                 .output_channels = 48,
+//                 .image           = {.width = 32, .height = 56},
+//                 .filter          = {.width = 3, .height = 3},
+//             },
+//         .filter_strides     = {.width = 1, .height = 1},
+//         .filter_dilation    = {.width = 1, .height = 1},
+//         .input_left_pad     = {.width = 0, .height = 0},
+//         .input_right_pad    = {.width = 0, .height = 0},
+//         .a_elementwise_op   = {},
+//         .b_elementwise_op   = {},
+//         .cde_elementwise_op = {},
+//     };
+
+//     auto inputs    = ckt::alloc_inputs(args);
+//     auto outputs   = ckt::alloc_outputs(args);
+//     auto reference = ckt::alloc_outputs(args);
+
+//     ckt::init_inputs(args, inputs.get());
+
+//     using namespace ck_tile::test;
+//     auto conv = Instance{};
+//     EXPECT_THAT(ckt::run(conv, args, inputs.get(), outputs.get()), SuccessfulRun());
+
+//     auto ref_conv = Reference{};
+//     EXPECT_THAT(ckt::run(ref_conv, args, inputs.get(), reference.get()), SuccessfulRun());
+
+//     EXPECT_THAT(outputs.get(), MatchesReference(args, reference.get()));
+// }
