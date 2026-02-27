@@ -131,9 +131,10 @@ struct BlockFmhaPipelineQXCustomPolicy</* QLoadOnce = */ true>
             // Ensure that QKBlockGemm's C (S) can be used as KVBlockGemm's A (P)
             constexpr index_t TargetCMPerLane = [] {
                 // Must be consistent with GetKVBlockGemm()
-                constexpr auto AttrNumAccess = std::is_same_v<typename Problem::PDataType, pk_fp4_t>
-                                                   ? WGAttrNumAccessEnum::Single
-                                                   : WGAttrNumAccessEnum::Double;
+                constexpr auto AttrNumAccess =
+                    ck_tile::is_any_of<typename Problem::PDataType, pk_fp4_t, pk_fp6x16_t>::value
+                        ? WGAttrNumAccessEnum::Single
+                        : WGAttrNumAccessEnum::Double;
                 using WarpGemm =
                     WarpGemmDispatcher<typename Problem::VDataType,
                                        typename Problem::PDataType,
@@ -1112,11 +1113,13 @@ struct BlockFmhaPipelineQXKSVSCustomPolicy : BlockFmhaPipelineQXCustomPolicy<QLo
         if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
         {
             constexpr auto warp_gemm = []() {
-                static_assert(std::is_same_v<typename Problem::PDataType, pk_fp4_t> ==
-                              std::is_same_v<typename Problem::VDataType, pk_fp4_t>);
-                constexpr auto AttrNumAccess = std::is_same_v<typename Problem::PDataType, pk_fp4_t>
-                                                   ? WGAttrNumAccessEnum::Single
-                                                   : WGAttrNumAccessEnum::Double;
+                static_assert(
+                    ck_tile::is_any_of<typename Problem::PDataType, pk_fp4_t, pk_fp6x16_t>::value ==
+                    std::is_same_v<typename Problem::VDataType, pk_fp4_t>);
+                constexpr auto AttrNumAccess =
+                    ck_tile::is_any_of<typename Problem::PDataType, pk_fp4_t, pk_fp6x16_t>::value
+                        ? WGAttrNumAccessEnum::Single
+                        : WGAttrNumAccessEnum::Double;
                 return WarpGemmDispatcher<typename Problem::VDataType,
                                           typename Problem::PDataType,
                                           typename Problem::OaccDataType,
