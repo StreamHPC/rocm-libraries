@@ -116,8 +116,8 @@ struct BlockFmhaPipelineQXCustomPolicy</* QLoadOnce = */ true>
                 constexpr auto AttrNumAccess = std::is_same_v<typename Problem::QDataType, pk_fp4_t>
                                                    ? WGAttrNumAccessEnum::Single
                                                    : WGAttrNumAccessEnum::Double;
-                return WarpGemmDispatcher<typename Problem::QDataType,
-                                          typename Problem::KDataType,
+                return WarpGemmDispatcher<typename Problem::KDataType,
+                                          typename Problem::QDataType,
                                           typename Problem::SaccDataType,
                                           Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
                                           Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
@@ -135,8 +135,8 @@ struct BlockFmhaPipelineQXCustomPolicy</* QLoadOnce = */ true>
                                                    ? WGAttrNumAccessEnum::Single
                                                    : WGAttrNumAccessEnum::Double;
                 using WarpGemm =
-                    WarpGemmDispatcher<typename Problem::PDataType,
-                                       typename Problem::VDataType,
+                    WarpGemmDispatcher<typename Problem::VDataType,
+                                       typename Problem::PDataType,
                                        typename Problem::OaccDataType,
                                        Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
                                        Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
@@ -181,8 +181,8 @@ struct BlockFmhaPipelineQXCustomPolicy</* QLoadOnce = */ true>
                     constexpr bool SwizzleA =
                         Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 32;
                     return WarpGemmDispatcher<
-                        typename Problem::QDataType,
                         typename Problem::KDataType,
+                        typename Problem::QDataType,
                         typename Problem::SaccDataType,
                         Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
                         Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
@@ -333,8 +333,8 @@ struct BlockFmhaPipelineQXCustomPolicy</* QLoadOnce = */ false>
             {
                 constexpr bool SwizzleA =
                     Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}) == 32;
-                return WarpGemmDispatcher<typename Problem::QDataType,
-                                          typename Problem::KDataType,
+                return WarpGemmDispatcher<typename Problem::KDataType,
+                                          typename Problem::QDataType,
                                           typename Problem::SaccDataType,
                                           Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
                                           Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
@@ -1117,8 +1117,8 @@ struct BlockFmhaPipelineQXKSVSCustomPolicy : BlockFmhaPipelineQXCustomPolicy<QLo
                 constexpr auto AttrNumAccess = std::is_same_v<typename Problem::PDataType, pk_fp4_t>
                                                    ? WGAttrNumAccessEnum::Single
                                                    : WGAttrNumAccessEnum::Double;
-                return WarpGemmDispatcher<typename Problem::PDataType,
-                                          typename Problem::VDataType,
+                return WarpGemmDispatcher<typename Problem::VDataType,
+                                          typename Problem::PDataType,
                                           typename Problem::OaccDataType,
                                           Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
                                           Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
@@ -1154,8 +1154,8 @@ struct BlockFmhaPipelineQXKSVSCustomPolicy : BlockFmhaPipelineQXCustomPolicy<QLo
                 else
                 {
                     return WarpGemmDispatcher<
-                        typename Problem::PDataType,
                         typename Problem::VDataType,
+                        typename Problem::PDataType,
                         typename Problem::OaccDataType,
                         Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
                         Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
