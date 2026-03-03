@@ -195,6 +195,11 @@ endif()
 add_ck_builder_test(test_ckb_build_bwd_weight_instances ${BWD_WEIGHT_TESTS})
 target_link_libraries(test_ckb_build_bwd_weight_instances PRIVATE utility)
 
+# Link CK Tile backward weight kernel instances (compiled in grouped_convolution_tile_instances)
+if(TARGET device_grouped_conv_tile_instances)
+    target_link_libraries(test_ckb_build_bwd_weight_instances PRIVATE device_grouped_conv_tile_instances)
+endif()
+
 add_ck_builder_test(test_ckb_build_bwd_data_instances
     conv/ck_tile/test_ckb_conv_bwd_data_2d_fp16_v3.cpp
     conv/ck/test_ckb_conv_bwd_data_multi_d_xdl_cshuffle.cpp
@@ -202,6 +207,11 @@ add_ck_builder_test(test_ckb_build_bwd_data_instances
     conv/ck/test_ckb_conv_bwd_data_multi_d_wmma_cshuffle_v3.cpp
     )
 target_link_libraries(test_ckb_build_bwd_data_instances PRIVATE utility)
+
+# Link CK Tile backward data kernel instances (compiled in grouped_convolution_tile_instances)
+if(TARGET device_grouped_conv_tile_instances)
+    target_link_libraries(test_ckb_build_bwd_data_instances PRIVATE device_grouped_conv_tile_instances)
+endif()
 
 
 ################################################################################

@@ -2,19 +2,21 @@
 # SPDX-License-Identifier: MIT
 
 if(GPU_TARGETS MATCHES "gfx9")
-  # Generate instances using python script (empty to just generate empty instance list)
-  if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/grouped_convolution_forward_tile_ndhwgc_fp32.inc)
+# Generate instances using python script (empty to just generate empty instance list)
+  if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/grouped_convolution_forward_tile_ndhwgc_fp32.inc
+     OR NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/grouped_convolution_backward_data_tile_nhwgc_fp16.inc)
     find_package(Python3 COMPONENTS Interpreter Development)
     execute_process(
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_instances.py --mode=tests
       RESULT_VARIABLE ret
     )
   endif()
-
-  # Find cpp files and create lib for instances
-  file(GLOB_RECURSE GROUPED_CONV_FWD_TILE "instances/*.cpp")
-  add_instance_library(device_grouped_conv_fwd_tile_instances ${GROUPED_CONV_FWD_TILE})
-  target_include_directories(device_grouped_conv_fwd_tile_instances PRIVATE
+  
+  # Find cpp files and create lib for instances (includes both forward and backward data instances)
+  file(GLOB_RECURSE GROUPED_CONV_TILE "instances/*.cpp")
+  add_instance_library(device_grouped_conv_tile_instances ${GROUPED_CONV_TILE})
+  target_include_directories(device_grouped_conv_tile_instances PRIVATE
         "${PROJECT_SOURCE_DIR}/experimental/builder/test/utils")
-  target_compile_options(device_grouped_conv_fwd_tile_instances PRIVATE -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=0)
+  target_compile_options(device_grouped_conv_tile_instances PRIVATE -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=0)
 endif()
+ 

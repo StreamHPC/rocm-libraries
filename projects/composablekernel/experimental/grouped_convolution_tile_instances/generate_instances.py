@@ -249,6 +249,54 @@ def generate_instances_fwd(instances, problem_name, config, filter_pattern):
     )
 
 
+def generate_bwd_data_cpp(
+    instances, problem_name, config, direction, signature_name, filter_pattern
+):
+    for instance in instances:
+        if problem_name.find(filter_pattern) == -1:
+            break
+        instance_name = problem_name + "_" + str(instance.id)
+        generate_dir = Path(__file__).resolve().parent
+        directory_path = Path(f"{generate_dir}/instances/{config}")
+        directory_path.mkdir(parents=True, exist_ok=True)
+        with open(
+            f"{generate_dir}/instances/grouped_convolution_backward_data_tile.cpp.in",
+            "r",
+        ) as f:
+            content = f.read()
+
+        content = content.replace("gen_signature", signature_name)
+        content = content.replace("gen_instance_name", instance_name)
+        content = content.replace("gen_specialization", instance.get_specialization())
+        content = content.replace("gen_thread_block", instance.get_thread_block())
+        content = content.replace("gen_block_gemm_desc", instance.get_block_gemm_desc())
+        content = content.replace("gen_block_transfer", instance.get_block_transfer())
+        content = content.replace("gen_optimizations", instance.get_optimizations())
+
+        with open(
+            f"{generate_dir}/instances/{config}/{instance_name}.cpp",
+            "w",
+        ) as f:
+            f.write(content)
+
+
+def generate_instances_bwd_data(instances, problem_name, config, filter_pattern):
+    direction = "backward_data"
+    signature_name = f"SIGNATURE_{config.upper()}_BWD_DATA"
+    instances = parse_fwd_instances(instances, problem_name)
+    generate_calls_inc(instances, problem_name, direction, filter_pattern)
+    generate_defs_inc(
+        instances,
+        problem_name,
+        signature_name,
+        direction,
+        filter_pattern,
+    )
+    generate_bwd_data_cpp(
+        instances, problem_name, config, direction, signature_name, filter_pattern
+    )
+
+
 if __name__ == "__main__":
     fwd_configs = [
         "nhwgc_fp32",
@@ -257,6 +305,15 @@ if __name__ == "__main__":
         "ndhwgc_fp32",
         "ndhwgc_fp16",
         "ndhwgc_bf16",
+    ]
+
+    bwd_data_configs = [
+        "nhwgc_fp32_bwd_data",
+        "nhwgc_fp16_bwd_data",
+        "nhwgc_bf16_bwd_data",
+        "ndhwgc_fp32_bwd_data",
+        "ndhwgc_fp16_bwd_data",
+        "ndhwgc_bf16_bwd_data",
     ]
 
     parser = argparse.ArgumentParser(
@@ -296,3 +353,19 @@ if __name__ == "__main__":
             instances = file.readlines()
         problem_name = f"grouped_convolution_forward_tile_{config}"
         generate_instances_fwd(instances, problem_name, config, args.filter_pattern)
+
+    for config in bwd_data_configs:
+        instances = []
+        generate_dir = Path(__file__).resolve().parent
+        config_path = f"{generate_dir}/configs/{configs_prefix}/{config}.conf"
+        # Skip if config file doesn't exist
+        if not Path(config_path).exists():
+            continue
+        with open(config_path, "r") as file:
+            instances = file.readlines()
+        # Extract base config name (without _bwd_data suffix)
+        base_config = config.replace("_bwd_data", "")
+        problem_name = f"grouped_convolution_backward_data_tile_{base_config}"
+        generate_instances_bwd_data(
+            instances, problem_name, base_config, args.filter_pattern
+        )

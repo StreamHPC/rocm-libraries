@@ -1,0 +1,36 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+#include "../instance_includes.inc"
+namespace ck_tile::builder::profiling {
+constexpr auto SIGNATURE = gen_signature;
+std::tuple<bool, float, std::string> run_gen_instance_name(const ckt::Args<SIGNATURE>& args,
+                                                           const ckt::Inputs<SIGNATURE>& inputs,
+                                                           const ckt::Outputs<SIGNATURE>& outputs,
+                                                           const ck_tile::stream_config& s_conf)
+{
+    constexpr auto ALGORITHM = cku::ConvAlgorithm_Tile_GroupedConvolutionKernel{}
+                                   .with_tile_specializations(gen_specialization)
+                                   .with_tile_thread_block(gen_thread_block)
+                                   .with_tile_block_gemm(gen_block_gemm_desc)
+                                   .with_tile_transfer(gen_block_transfer)
+                                   .with_tile_optimizations(gen_optimizations);
+#include "../instance_run.inc"
+}
+
+// Force kernel instantiation for device code compilation  
+namespace {
+constexpr auto _FORCE_SIGNATURE = gen_signature;
+constexpr auto _FORCE_ALGORITHM = cku::ConvAlgorithm_Tile_GroupedConvolutionKernel{}
+                                       .with_tile_specializations(gen_specialization)
+                                       .with_tile_thread_block(gen_thread_block)
+                                       .with_tile_block_gemm(gen_block_gemm_desc)
+                                       .with_tile_transfer(gen_block_transfer)
+                                       .with_tile_optimizations(gen_optimizations);
+using _ForceBuilder = ckb::ConvBuilder<_FORCE_SIGNATURE, decltype(_FORCE_ALGORITHM)>;
+using _ForceInstance = typename _ForceBuilder::Instance;
+
+// Trigger instantiation of the kernel
+__attribute__((used)) static const auto _kernel_type_info = typeid(_ForceInstance);
+}
+
+} // namespace ck_tile::builder::profiling
