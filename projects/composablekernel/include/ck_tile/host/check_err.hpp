@@ -20,6 +20,7 @@ namespace ck_tile {
 
 /** @brief Maximum number of error values to display when checking errors */
 constexpr int ERROR_DETAIL_LIMIT = 16;
+// constexpr int ERROR_DETAIL_LIMIT = 128;
 
 /** @brief 8-bit floating point type */
 using F8 = ck_tile::fp8_t;
@@ -296,18 +297,46 @@ check_err(const Range& out,
         return either_not_finite && !(allow_infinity_ref && both_infinite_and_same);
     };
 
+    size_t d0 =
+        out.get_num_of_dimension() >= 2 ? out.get_lengths()[out.get_num_of_dimension() - 2] : 1;
+    size_t d1 = out.get_lengths()[out.get_num_of_dimension() - 1];
+
+    std::cerr << std::endl;
+    // for(std::size_t i = 0; i < std::min(size_t{256 * 256}, ref.size()); ++i)
+    int count = 0;
+    for(std::size_t i = 0; i < ref.size(); ++i)
+    {
+        const double o   = *std::next(std::begin(out), i);
+        const double r   = *std::next(std::begin(ref), i);
+        const double rel = std::abs(r - o) / std::max(std::abs(o), std::abs(r));
+        // if(rel > 0.05 || i % 123 == 0)
+        if(i % 123 == 0 && count < ERROR_DETAIL_LIMIT)
+        {
+            ck_tile::ignore = count;
+            count++;
+            // std::cerr << std::setw(12) << std::setprecision(7) << i << "\t" << (i / 256) << "\t"
+            //           << (i % 256) << "\t" << o << "\t" << r << "\t" << rel
+            //           << (rel > 0.05 ? "*****" : "") << std::endl;
+            std::cerr << std::setw(12) << std::setprecision(7) << i << "\t" << (i / d1 / d0) << "\t"
+                      << (i / d1 % d0) << "\t" << (i % d1) << "\t" << o << " != " << r << "\t"
+                      << rel << std::endl;
+        }
+    }
+
     bool res{true};
     int err_count  = 0;
     double err     = 0;
     double max_err = std::numeric_limits<double>::min();
+    double stddev  = 0;
     for(std::size_t i = 0; i < ref.size(); ++i)
     {
         const double o = *std::next(std::begin(out), i);
         const double r = *std::next(std::begin(ref), i);
         err            = std::abs(o - r);
+        max_err        = err > max_err ? err : max_err;
+        stddev += err * err;
         if(err > atol + rtol * std::abs(r) || is_infinity_error(o, r))
         {
-            max_err = err > max_err ? err : max_err;
             err_count++;
             if(err_count < ERROR_DETAIL_LIMIT)
             {
@@ -317,8 +346,9 @@ check_err(const Range& out,
             res = false;
         }
     }
-    if(!res)
+    // if(!res)
     {
+        std::cerr << "stddev: " << std::sqrt(stddev / double(ref.size())) << " ";
         report_error_stats(err_count, max_err, ref.size());
     }
     return res;

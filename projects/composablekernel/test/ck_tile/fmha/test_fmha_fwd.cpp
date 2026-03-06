@@ -170,6 +170,72 @@ auto EnableTestIf(bool condition)
     return ValuesIn(condition ? std::vector<bool>{true} : std::vector<bool>{});
 }
 
+class Simple : public TestWithParam<std::tuple<std::tuple<int, int>,
+                                               bool,
+                                               bool,
+                                               mode_enum,
+                                               std::tuple<int, int, int, std::string>,
+                                               std::tuple<int, int>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    Simple,
+    Combine(HDimValues,
+            Values(false),
+            IsVRowmajorValues,
+            Values(mode_enum::batch),
+            Values(std::tuple{1, 1, 1, "0"}, std::tuple{1, 1, 1, "1"}, std::tuple{1, 1, 1, "2"}),
+            Values(std::tuple{128, 128},
+                   std::tuple{128, 256},
+                   std::tuple{128, 512},
+                   std::tuple{128, 1024},
+                   std::tuple{128, 1024 + 128},
+                   std::tuple{128, 1024 * 2})));
+
+TEST_P(Simple, DataTypeConfig)
+{
+    auto [hdims, perm, is_v_rowmajor, mode, dims_mask, seqlens] = GetParam();
+    auto [hdim_q, hdim_v]                                       = hdims;
+    auto [batch, nhead, nhead_k, mask_str]                      = dims_mask;
+    auto [seqlen_q, seqlen_k]                                   = seqlens;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                               batch,
+                                               nhead,
+                                               nhead_k,
+                                               {adjust_seqlen(seqlen_q)},
+                                               {adjust_seqlen(seqlen_k)},
+                                               hdim_q,
+                                               hdim_v,
+                                               0,             // seqlen_knew
+                                               {-1},          // seqlen_qpads
+                                               {-1},          // seqlen_kpads
+                                               {},            // q_eff_lens_per_batch
+                                               {},            // kv_eff_lens_per_batch
+                                               0,             // rotary_dim
+                                               perm,          // i_perm
+                                               perm,          // o_perm
+                                               0,             // scale_s
+                                               0,             // logits_soft_cap
+                                               is_v_rowmajor, // is_v_rowmajor
+                                               def_lse,       // lse
+                                               0,             // page_block_size
+                                               false,         // use_cache_batch_idx
+                                               "n",           // bias_str
+                                               0.0f,          // p_drop
+                                               0,             // drop_seed
+                                               0,             // drop_offset
+                                               false,         // drop_prefs
+                                               mask_str,      // mask_str
+                                               qscale_str,
+                                               true, // is_rotary_interleaved
+                                               1,    // num_splits
+                                               COMMON_ARGS);
+    CHECK_RESULT(result);
+}
+
 class AllLong : public TestWithParam<
                     std::tuple<bool,
                                std::tuple<int, int>,
