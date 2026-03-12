@@ -668,6 +668,10 @@ struct BlockFmhaPipelineQRKSVSAsync
                     move_tile_window(bias_dram_window, {0, seqlen_k_start - sink_seq_end});
             }
             move_tile_window(bias_dram_window, {0, kN0});
+                                        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+            {
+                move_tile_window(k_scale_dram_block_window, {kN0, 0});
+            }
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 const auto k_origin      = k_dram_block_window.get_window_origin();
@@ -941,16 +945,21 @@ struct BlockFmhaPipelineQRKSVSAsync
                 }
                 else
                 {
-#if defined(__gfx11__)
-                    auto p_result = make_static_distributed_tensor<PDataType>(
-                        decltype(gemm_1)::template MakeABlockTileDistribution<kM0, kN0>());
-                    PermuteWarpGemmCToA(p_result,
-                                        cast_tile<PDataType>(tile_elementwise_in(
-                                            p_compute_element_func, p_compute)));
+            const auto p_result = [&]() {
+#if CK_TILE_FMHA_FLOAT_TO_FLOAT16_RTN
+                // For fp32 to fp16,
+                // impl::cast_tile_pkrtz_fp16_fp32 would cause precision issue,
+                // since it uses __builtin_amdgcn_cvt_pkrtz, which is round to zero.
+                return cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
 #else
-                    const auto p_result = cast_tile<PDataType>(
+                if constexpr(std::is_same_v<PDataType, fp16_t>)
+                    return impl::cast_tile_pkrtz_fp16_fp32<PDataType>(
+                        tile_elementwise_in(p_compute_element_func, p_compute));
+                else
+                    return cast_tile<PDataType>(
                         tile_elementwise_in(p_compute_element_func, p_compute));
 #endif
+         }();
                     return make_tuple(p_result, null_tensor{});
                 }
             }();
@@ -1035,8 +1044,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                     if constexpr(i_k1 < k1_loops - 1)
                         move_tile_window(v_dram_window, {0, kK1});
 
-                     v_scale_block_tile = load_v_scale_block_tile();
-                });
+                                     });
             }
             i_total_loops++;
             if(i_total_loops < num_total_loop)
@@ -1050,6 +1058,10 @@ struct BlockFmhaPipelineQRKSVSAsync
                     }
                 }
                 move_tile_window(k_dram_block_window, {kN0, 0});
+                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+                {
+                move_tile_window(k_scale_dram_block_window, {kN0, 0});
+                }
 
                 k_dram_window.set_window_origin(k_dram_block_window.get_window_origin());
 
@@ -1063,10 +1075,6 @@ struct BlockFmhaPipelineQRKSVSAsync
                                     k_pre_np);
                 move_tile_window(k_dram_window, {0, kK0});
 
-                            if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
-            {
-                move_tile_window(k_scale_dram_block_window, {kN0, 0});
-            }
             }
             // tail
             {
