@@ -84,7 +84,8 @@ struct BlockFmhaPipelineQRKSVSAsync
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
-    static constexpr index_t kAlignmentQ = Policy::template GetAlignmentQ<Problem>();
+    static constexpr index_t kAlignmentQ = kPadHeadDimQ ? numeric_traits<QDataType>::PackedSize
+                                                        : Policy::template GetAlignmentQ<Problem>();
     static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
     static constexpr index_t kAlignmentV = []() {
         if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
