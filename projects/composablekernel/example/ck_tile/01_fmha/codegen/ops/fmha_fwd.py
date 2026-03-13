@@ -840,6 +840,7 @@ class CompatibilityRuleFactoryGfx9(CompatibilityRuleFactory):
         ) -> bool:
             # FIX: too confusing that it has to know about mx types
             if problem_ctx.dtype not in ("fp32", "mxfp8", "mxfp4"):
+            # if problem_ctx.dtype not in ("fp32", "mxfp4"):
                 # TODO: update if >=gfx11 archs get qr_async and qr_async_trload support
                 if kernel_ctx.pipeline.tag in cls._AVAILABLE_PIPELINES and (
                     (
@@ -1030,6 +1031,8 @@ class KernelComponentFactoryGfx9(CompatibilityRuleFactoryGfx9):
                 ["no"],
                 ["f", "t"],
             ):
+                # pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                # pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
                 if hdim == 64:
                     pipelines.append(FmhaFwdPipeline("qr", "row", "t", "f", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", sink))  # fmt: skip
@@ -1124,6 +1127,8 @@ class KernelComponentFactoryGfx950(
                 ["no"],
                 ["f", "t"],
             ):
+                # pipelines.append(FmhaFwdPipeline("qr", "col", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, "f", "f", sink))  # fmt: skip
+                # pipelines.append(FmhaFwdPipeline("qr", "col", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, "f", "f", sink))  # fmt: skip
                 pipelines.append(FmhaFwdPipeline("qr_async", "col", "t", "f", "t", "t", logits, bias, lse, dropout, qscale, mask, "f", "f", sink))  # fmt: skip
                 pipelines.append(FmhaFwdPipeline("qr_async", "col", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, "f", "f", sink))  # fmt: skip
         return pipelines

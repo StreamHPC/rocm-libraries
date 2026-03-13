@@ -668,7 +668,6 @@ struct BlockFmhaPipelineQRKSVSAsync
                     move_tile_window(bias_dram_window, {0, seqlen_k_start - sink_seq_end});
             }
             move_tile_window(bias_dram_window, {0, kN0});
-                                        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 const auto k_origin      = k_dram_block_window.get_window_origin();
