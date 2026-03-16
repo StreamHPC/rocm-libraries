@@ -69,7 +69,7 @@ struct BlockFmhaPipelineQRKSVSAsync
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kHasDropout       = Problem::kHasDropout;
     static constexpr bool kHasSink          = Problem::kHasSink;
-    
+
     static constexpr ck_tile::index_t kQKScaleGranularity = Problem::kQKScaleGranularity;
     static constexpr ck_tile::index_t kVScaleGranularity  = Problem::kVScaleGranularity;
 
@@ -225,7 +225,7 @@ struct BlockFmhaPipelineQRKSVSAsync
             "wrong!");
 
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
-                        kSubQKHeaddim ==
+                          kSubQKHeaddim ==
                               QDramBlockWindowTmp{}.get_window_lengths()[number<1>{}] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
                           kK0 == KDramBlockWindowTmp{}.get_window_lengths()[number<1>{}] &&
@@ -433,8 +433,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                              v_dram_block_window_tmp.get_window_lengths(),
                              {0, kv_load_start}, // TODO: hdim split?
                              Policy::template MakeVDramTileDistribution<Problem>());
-        
-        
+
         auto q_scale = [&] {
             if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
             {
@@ -461,8 +460,7 @@ struct BlockFmhaPipelineQRKSVSAsync
             {
                 return make_null_tile_window(make_tuple());
             }
-            
-                }();
+        }();
         auto v_scale_dram_window = [&] {
             if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
             {
@@ -477,8 +475,7 @@ struct BlockFmhaPipelineQRKSVSAsync
             }
         }();
 
-
-       // prefetch K tile
+        // prefetch K tile
         async_load_tile_raw(
             k_lds_store(LdsSeq.at(number<0>{})), k_dram_window, number<-1>{}, k_oob_ck, k_pre_np);
         move_tile_window(k_dram_window, {0, kK0});
@@ -519,7 +516,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                 }
             }();
 
-        auto load_k_scale_block_tile = [&] {
+            auto load_k_scale_block_tile = [&] {
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
                 {
                     auto t = load_tile(k_scale_dram_window);
@@ -531,13 +528,14 @@ struct BlockFmhaPipelineQRKSVSAsync
                     return make_null_tile_window(make_tuple());
                 }
             };
-              auto k_scale_block_tile = load_k_scale_block_tile();
-            auto run_gemm_0 = [&](auto i_k0) {
-                auto q_slice = get_slice_tile(
-                    q, sequence<0, i_k0 * kK0>{}, sequence<kM0, (i_k0 + 1) * kK0>{});
-                auto k_scale_lds_load = get_slice_tile(k_lds_load,
-                                          sequence<(LdsSeq.at(number<i_k0>{})) * kN0, 0>{},
-                                          sequence<(LdsSeq.at(number<i_k0>{}) + 1) * kN0, kK0>{});
+            auto k_scale_block_tile = load_k_scale_block_tile();
+            auto run_gemm_0         = [&](auto i_k0) {
+                auto q_slice =
+                    get_slice_tile(q, sequence<0, i_k0 * kK0>{}, sequence<kM0, (i_k0 + 1) * kK0>{});
+                auto k_scale_lds_load =
+                    get_slice_tile(k_lds_load,
+                                   sequence<(LdsSeq.at(number<i_k0>{})) * kN0, 0>{},
+                                   sequence<(LdsSeq.at(number<i_k0>{}) + 1) * kN0, kK0>{});
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
                 {
                     auto q_scale_slice =
@@ -549,8 +547,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                 else
                 {
                     gemm_0(s_acc, q_slice, k_scale_lds_load);
-                  //  schedule_gemm_0();
-
+                    //  schedule_gemm_0();
                 }
             };
 
@@ -599,9 +596,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                     return s_acc_element_func;
             }();
 
-                     
-
-           // STAGE 2, scale_s, add bias, mask, softmax
+            // STAGE 2, scale_s, add bias, mask, softmax
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
                 s_acc = tile_elementwise_in(s_acc_element_func_, s_acc);
@@ -884,23 +879,25 @@ struct BlockFmhaPipelineQRKSVSAsync
                     randval_ptr, seq_offset, p_compute, randval_dram_window);
             }
 
-//             const auto p = [&]() {
-// #if CK_TILE_FMHA_FLOAT_TO_FLOAT16_RTN
-//                 // For fp32 to fp16,
-//                 // impl::cast_tile_pkrtz_fp16_fp32 would cause precision issue,
-//                 // since it uses __builtin_amdgcn_cvt_pkrtz, which is round to zero.
-//                 return cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
-// #else
-//                 if constexpr(std::is_same_v<PDataType, fp16_t>)
-//                     return impl::cast_tile_pkrtz_fp16_fp32<PDataType>(
-//                         tile_elementwise_in(p_compute_element_func, p_compute));
-//                 else
-//                     return cast_tile<PDataType>(
-//                         tile_elementwise_in(p_compute_element_func, p_compute));
-// #endif
-//             }();
-            
-                        auto load_v_scale_block_tile = [&] {
+            //             const auto p = [&]() {
+            // #if CK_TILE_FMHA_FLOAT_TO_FLOAT16_RTN
+            //                 // For fp32 to fp16,
+            //                 // impl::cast_tile_pkrtz_fp16_fp32 would cause precision issue,
+            //                 // since it uses __builtin_amdgcn_cvt_pkrtz, which is round to zero.
+            //                 return
+            //                 cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func,
+            //                 p_compute));
+            // #else
+            //                 if constexpr(std::is_same_v<PDataType, fp16_t>)
+            //                     return impl::cast_tile_pkrtz_fp16_fp32<PDataType>(
+            //                         tile_elementwise_in(p_compute_element_func, p_compute));
+            //                 else
+            //                     return cast_tile<PDataType>(
+            //                         tile_elementwise_in(p_compute_element_func, p_compute));
+            // #endif
+            //             }();
+
+            auto load_v_scale_block_tile = [&] {
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
                 {
                     auto t = load_tile(v_scale_dram_window);
@@ -922,7 +919,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                 v_descale            = v_descale_ptr[kv_idx];
             }
 
-              const auto p_p_scale = [&] {
+            const auto p_p_scale = [&] {
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
                 {
                     auto p_result = make_static_distributed_tensor<PDataType>(
@@ -941,25 +938,26 @@ struct BlockFmhaPipelineQRKSVSAsync
                 }
                 else
                 {
-            const auto p_result = [&]() {
+                    const auto p_result = [&]() {
 #if CK_TILE_FMHA_FLOAT_TO_FLOAT16_RTN
-                // For fp32 to fp16,
-                // impl::cast_tile_pkrtz_fp16_fp32 would cause precision issue,
-                // since it uses __builtin_amdgcn_cvt_pkrtz, which is round to zero.
-                return cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
+                        // For fp32 to fp16,
+                        // impl::cast_tile_pkrtz_fp16_fp32 would cause precision issue,
+                        // since it uses __builtin_amdgcn_cvt_pkrtz, which is round to zero.
+                        return cast_tile<PDataType>(
+                            tile_elementwise_in(p_compute_element_func, p_compute));
 #else
-                if constexpr(std::is_same_v<PDataType, fp16_t>)
-                    return impl::cast_tile_pkrtz_fp16_fp32<PDataType>(
-                        tile_elementwise_in(p_compute_element_func, p_compute));
-                else
-                    return cast_tile<PDataType>(
-                        tile_elementwise_in(p_compute_element_func, p_compute));
+                        if constexpr(std::is_same_v<PDataType, fp16_t>)
+                            return impl::cast_tile_pkrtz_fp16_fp32<PDataType>(
+                                tile_elementwise_in(p_compute_element_func, p_compute));
+                        else
+                            return cast_tile<PDataType>(
+                                tile_elementwise_in(p_compute_element_func, p_compute));
 #endif
-         }();
+                    }();
                     return make_tuple(p_result, null_tensor{});
                 }
             }();
-            const auto p    = p_p_scale[number<0>{}];
+            const auto p       = p_p_scale[number<0>{}];
             const auto p_scale = p_p_scale[number<1>{}];
 
             // STAGE 3, KV gemm
@@ -977,13 +975,13 @@ struct BlockFmhaPipelineQRKSVSAsync
                 }
             }();
 
-               auto run_gemm_1 = [&](auto i_k1) {
+            auto run_gemm_1 = [&](auto i_k1) {
                 auto p_slice =
                     get_slice_tile(p, sequence<0, i_k1 * kK1>{}, sequence<kM0, (i_k1 + 1) * kK1>{});
-                auto v_scale_lds_window =  get_slice_tile(
-                        v_lds_window,
-                        sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{})) * kN1, 0>{},
-                        sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{}) + 1) * kN1, kK1>{});
+                auto v_scale_lds_window = get_slice_tile(
+                    v_lds_window,
+                    sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{})) * kN1, 0>{},
+                    sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{}) + 1) * kN1, kK1>{});
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
                 {
                     auto p_scale_slice =
@@ -999,7 +997,6 @@ struct BlockFmhaPipelineQRKSVSAsync
                 else
                 {
                     gemm_1(o_acc_, p_slice, v_scale_lds_window);
-                   
                 }
             };
 
@@ -1012,8 +1009,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                             v_dram_window, number<-1>{}, bool_constant<false>{}); // load next v_buf
                     }
                     block_sync_lds();
-                     run_gemm_1(number<i_k1>{});
-
+                    run_gemm_1(number<i_k1>{});
 
                     if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
                     {
@@ -1039,8 +1035,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                     }
                     if constexpr(i_k1 < k1_loops - 1)
                         move_tile_window(v_dram_window, {0, kK1});
-
-                                     });
+                });
             }
             i_total_loops++;
             if(i_total_loops < num_total_loop)
@@ -1054,9 +1049,9 @@ struct BlockFmhaPipelineQRKSVSAsync
                     }
                 }
                 move_tile_window(k_dram_block_window, {kN0, 0});
-                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+                if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
                 {
-                move_tile_window(k_scale_dram_block_window, {kN0, 0});
+                    move_tile_window(k_scale_dram_block_window, {kN0, 0});
                 }
 
                 k_dram_window.set_window_origin(k_dram_block_window.get_window_origin());
@@ -1070,12 +1065,11 @@ struct BlockFmhaPipelineQRKSVSAsync
                                     k_oob_ck,
                                     k_pre_np);
                 move_tile_window(k_dram_window, {0, kK0});
-
             }
             // tail
             {
                 block_sync_lds();
-               run_gemm_1(number<k1_loops - 1>{});
+                run_gemm_1(number<k1_loops - 1>{});
             }
 
             if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
