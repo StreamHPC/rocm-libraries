@@ -532,7 +532,7 @@ struct BlockFmhaPipelineQRKSVSAsync
             auto run_gemm_0         = [&](auto i_k0) {
                 auto q_slice =
                     get_slice_tile(q, sequence<0, i_k0 * kK0>{}, sequence<kM0, (i_k0 + 1) * kK0>{});
-                auto k_scale_lds_load =
+                auto k_slice =
                     get_slice_tile(k_lds_load,
                                    sequence<(LdsSeq.at(number<i_k0>{})) * kN0, 0>{},
                                    sequence<(LdsSeq.at(number<i_k0>{}) + 1) * kN0, kK0>{});
@@ -542,11 +542,11 @@ struct BlockFmhaPipelineQRKSVSAsync
                         get_slice_tile(q_scale,
                                        sequence<0, i_k0*(kK0 / kQKScaleGranularity)>{},
                                        sequence<kM0, (i_k0 + 1) * (kK0 / kQKScaleGranularity)>{});
-                    gemm_0(s_acc, q_slice, q_scale_slice, k_scale_lds_load, k_scale_block_tile);
+                    gemm_0(s_acc, q_slice, q_scale_slice, k_slice, k_scale_block_tile);
                 }
                 else
                 {
-                    gemm_0(s_acc, q_slice, k_scale_lds_load);
+                    gemm_0(s_acc, q_slice, k_slice);
                     //  schedule_gemm_0();
                 }
             };
@@ -978,7 +978,7 @@ struct BlockFmhaPipelineQRKSVSAsync
             auto run_gemm_1 = [&](auto i_k1) {
                 auto p_slice =
                     get_slice_tile(p, sequence<0, i_k1 * kK1>{}, sequence<kM0, (i_k1 + 1) * kK1>{});
-                auto v_scale_lds_window = get_slice_tile(
+                auto v_slice = get_slice_tile(
                     v_lds_window,
                     sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{})) * kN1, 0>{},
                     sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{}) + 1) * kN1, kK1>{});
@@ -988,15 +988,15 @@ struct BlockFmhaPipelineQRKSVSAsync
                         get_slice_tile(p_scale,
                                        sequence<0, i_k1*(kK1 / kVScaleGranularity)>{},
                                        sequence<kM0, (i_k1 + 1) * (kK1 / kVScaleGranularity)>{});
-                    gemm_1(o_acc_, p_slice, p_scale_slice, v_scale_lds_window, v_scale_block_tile);
+                    gemm_1(o_acc_, p_slice, p_scale_slice, v_slice, v_scale_block_tile);
                 }
                 else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
                 {
-                    gemm_1(o_acc0, p_slice, v_scale_lds_window);
+                    gemm_1(o_acc0, p_slice, v_slice);
                 }
                 else
                 {
-                    gemm_1(o_acc_, p_slice, v_scale_lds_window);
+                    gemm_1(o_acc_, p_slice, v_slice);
                 }
             };
 
