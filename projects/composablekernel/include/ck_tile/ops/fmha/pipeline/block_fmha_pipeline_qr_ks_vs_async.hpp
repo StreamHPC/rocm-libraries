@@ -980,8 +980,8 @@ struct BlockFmhaPipelineQRKSVSAsync
                     get_slice_tile(p, sequence<0, i_k1 * kK1>{}, sequence<kM0, (i_k1 + 1) * kK1>{});
                 auto v_slice = get_slice_tile(
                     v_lds_window,
-                    sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{})) * kN1, 0>{},
-                    sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{}) + 1) * kN1, kK1>{});
+                    sequence<(LdsSeq.at(number < k0_loops + kK1{})) * kN1, 0>{},
+                    sequence<(LdsSeq.at(number<k0_loops + kK1>{}) + 1) * kN1, kK1>{});
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
                 {
                     auto p_scale_slice =
@@ -1035,6 +1035,8 @@ struct BlockFmhaPipelineQRKSVSAsync
                     }
                     if constexpr(i_k1 < k1_loops - 1)
                         move_tile_window(v_dram_window, {0, kK1});
+
+                    v_scale_block_tile = load_v_scale_block_tile();
                 });
             }
             i_total_loops++;
