@@ -1035,6 +1035,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                     }
                     if constexpr(i_k1 < k1_loops - 1)
                         move_tile_window(v_dram_window, {0, kK1});
+                    v_scale_block_tile = load_v_scale_block_tile();
                 });
             }
             i_total_loops++;
