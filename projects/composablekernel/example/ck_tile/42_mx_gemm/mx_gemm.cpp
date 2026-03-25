@@ -274,7 +274,7 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
 
     if constexpr(GemmConfig::Preshuffle)
     {
-        const auto b_shuffled_host = ck_tile::shuffle_b<GemmConfig>(b_host);
+        const auto b_shuffled_host = MXGemmArchTraits<GemmConfig>::preShuffleWeight(b_host);
         const auto scale_a_shuffled =
             MXGemmArchTraits<GemmConfig>::template preShuffleScale<true>(scale_a_host);
         const auto scale_b_shuffled =

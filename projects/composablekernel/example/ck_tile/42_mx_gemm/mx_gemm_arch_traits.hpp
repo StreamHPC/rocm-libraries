@@ -13,6 +13,40 @@ struct MXGemmArchTraits
 {
     using Config = GemmConfig;
 
+    template <typename dtype>
+    static auto preShuffleWeight(ck_tile::HostTensor<dtype>& src)
+    {
+        constexpr ck_tile::index_t NLane = Config::N_Warp_Tile;
+        auto src_lengths                 = src.get_lengths();
+        const int K                      = src_lengths[0];
+        const int N                      = src_lengths[1];
+        constexpr int packed_size        = ck_tile::numeric_traits<dtype>::PackedSize;
+        const int KPack = std::is_same_v<dtype, ck_tile::pk_fp6x16_t> ? 32 : 16 * packed_size;
+        const int KLane = ck_tile::get_warp_size() / NLane;
+        const int K0    = K / (KLane * KPack);
+        ck_tile::HostTensor<dtype> shuffled(ck_tile::HostTensorDescriptor(
+            {static_cast<std::size_t>(N * K)}, {static_cast<std::size_t>(1)}));
+
+        for(int n = 0; n < N; ++n)
+        {
+            for(int k = 0; k < K; k += packed_size)
+            {
+                const int n0          = n / NLane;
+                const int n1          = n % NLane;
+                const int k0          = k / (KLane * KPack);
+                const int tempk       = k % (KLane * KPack);
+                const int k1          = tempk / KPack;
+                const int k2          = tempk % KPack;
+                const int outputIndex = n0 * KPack * NLane * KLane * K0 +
+                                        k0 * KPack * NLane * KLane + k1 * KPack * NLane +
+                                        n1 * KPack + k2;
+                shuffled(outputIndex) = src(k, n);
+            }
+        }
+
+        return shuffled;
+    }
+
     template <bool KLast, typename dtype>
     static auto preShuffleScale(const ck_tile::HostTensor<dtype>& src)
     {
