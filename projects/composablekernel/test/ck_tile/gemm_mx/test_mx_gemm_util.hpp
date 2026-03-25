@@ -195,6 +195,11 @@ class TestMxGemmUtil : public ::testing::Test
         constexpr ck_tile::index_t XdlMNThread = GemmConfig::M_Warp_Tile;
         constexpr ck_tile::index_t XdlKThread  = 64 / XdlMNThread;
 
+        auto scale_a_packed =
+            packScalesMNxK<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_a_host, true);
+        auto scale_b_packed =
+            packScalesMNxK<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_b_host, false);
+
         const auto b_host_for_device = [&]() {
             if constexpr(GemmConfig::Preshuffle)
                 return ck_tile::shuffle_b<GemmConfig>(b_host);
@@ -221,14 +226,18 @@ class TestMxGemmUtil : public ::testing::Test
         ck_tile::DeviceMem a_dev_buf(a_host.get_element_space_size_in_bytes());
         ck_tile::DeviceMem b_dev_buf(b_host_for_device.get_element_space_size_in_bytes());
         ck_tile::DeviceMem c_dev_buf(c_host.get_element_space_size_in_bytes());
-        auto scale_a_packed =
-            packScalesMNxK<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_a_host, true);
-        auto scale_b_packed =
-            packScalesMNxK<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_b_host, false);
-        ck_tile::DeviceMem scale_a_dev_buf(
-            scale_a_host_for_device.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem scale_b_dev_buf(
-            scale_b_host_for_device.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem scale_a_dev_buf([&]() {
+            if constexpr(GemmConfig::Preshuffle)
+                return scale_a_host_for_device.get_element_space_size_in_bytes();
+            else
+                return scale_a_packed.size() * sizeof(int32_t);
+        }());
+        ck_tile::DeviceMem scale_b_dev_buf([&]() {
+            if constexpr(GemmConfig::Preshuffle)
+                return scale_b_host_for_device.get_element_space_size_in_bytes();
+            else
+                return scale_b_packed.size() * sizeof(int32_t);
+        }());
 
         a_dev_buf.ToDevice(a_host.data());
         b_dev_buf.ToDevice(b_host_for_device.data());
