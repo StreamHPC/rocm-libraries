@@ -25,21 +25,7 @@ TYPED_TEST_SUITE(TestMxGemmFp4, MxFp4Types);
 
 TYPED_TEST(TestMxGemmFp4, BasicSizes)
 {
-    using GemmConfig = std::tuple_element_t<2, TypeParam>;
-
-    if constexpr(GemmConfig::Preshuffle)
-    {
-        // Preshuffle path: B preshuffle layout requires
-        // M_Tile>=128, N_Tile>=512, K_Tile>=256
-        this->Run(128, 512, 256);
-        this->Run(256, 512, 256);
-        this->Run(256, 1024, 512);
-    }
-    else
-    {
-        // Non-preshuffle path
-        this->Run(64, 64, 256);
-        this->Run(128, 128, 256);
-        this->Run(64, 128, 512);
-    }
+    this->Run(128, 512, 256);
+    this->Run(256, 512, 256);
+    this->Run(256, 1024, 512);
 }

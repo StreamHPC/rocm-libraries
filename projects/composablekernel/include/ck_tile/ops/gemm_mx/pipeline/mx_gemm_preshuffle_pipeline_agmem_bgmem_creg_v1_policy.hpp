@@ -350,6 +350,12 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeMX_ScaleA_DramTileDistribution()
     {
+        constexpr index_t MRepeat = MPerBlock / (MWarps * MPerXdl);
+        static_assert(MWarps == 1,
+                      "Current preshuffle ScaleA distribution assumes a single warp along M.");
+        static_assert(MRepeat % MXdlPack == 0,
+                      "ScaleA distribution requires MRepeat to be divisible by MXdlPack.");
+
         constexpr index_t M_Lanes = TileShape::WarpTile::at(I0);
         constexpr index_t K_Lanes = 64 / M_Lanes;
 
@@ -371,6 +377,10 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeMX_ScaleB_DramTileDistribution()
     {
+        constexpr index_t NRepeat = NPerBlock / (NWarps * NPerXdl);
+        static_assert(NRepeat % NXdlPack == 0,
+                      "ScaleB distribution requires NRepeat to be divisible by NXdlPack.");
+
         constexpr index_t N_Lanes = TileShape::WarpTile::at(I1);
         constexpr index_t K_Lanes = 64 / N_Lanes;
 

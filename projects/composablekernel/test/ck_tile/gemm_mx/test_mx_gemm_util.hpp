@@ -33,45 +33,6 @@ auto calculate_rtol_atol_mx(ck_tile::index_t K, float max_accumulated_value)
 template <typename GemmConfig>
 struct TestMXGemmArchTraits
 {
-    template <typename dtype>
-    static auto preShuffleWeight(ck_tile::HostTensor<dtype>& src)
-    {
-        constexpr ck_tile::index_t NLane = GemmConfig::N_Warp_Tile;
-        auto src_lengths                 = src.get_lengths();
-        const int K                      = src_lengths[0];
-        const int N                      = src_lengths[1];
-        constexpr int packed_size        = ck_tile::numeric_traits<dtype>::PackedSize;
-        const int KPack = std::is_same_v<dtype, ck_tile::pk_fp6x16_t> ? 32 : 16 * packed_size;
-
-        const int KLane = ck_tile::get_warp_size() / NLane;
-        const int K0    = K / (KLane * KPack);
-
-        ck_tile::HostTensor<dtype> shuffled(ck_tile::HostTensorDescriptor(
-            {static_cast<std::size_t>(N * K)}, {static_cast<std::size_t>(1)}));
-
-        for(int n = 0; n < N; ++n)
-        {
-            for(int k = 0; k < K; k += packed_size)
-            {
-                const int n0 = n / NLane;
-                const int n1 = n % NLane;
-
-                const int k0    = k / (KLane * KPack);
-                const int tempk = k % (KLane * KPack);
-                const int k1    = tempk / KPack;
-                const int k2    = tempk % KPack;
-
-                const int outputIndex = n0 * KPack * NLane * KLane * K0 +
-                                        k0 * KPack * NLane * KLane + k1 * KPack * NLane +
-                                        n1 * KPack + k2;
-
-                shuffled(outputIndex) = src(k, n);
-            }
-        }
-
-        return shuffled;
-    }
-
     template <bool KLast, typename dtype>
     static auto preShuffleScale(ck_tile::HostTensor<dtype>& src)
     {
@@ -236,7 +197,7 @@ class TestMxGemmUtil : public ::testing::Test
 
         const auto b_host_for_device = [&]() {
             if constexpr(GemmConfig::Preshuffle)
-                return TestMXGemmArchTraits<GemmConfig>::preShuffleWeight(b_host);
+                return ck_tile::shuffle_b<GemmConfig>(b_host);
             else
                 return b_host;
         }();
@@ -309,67 +270,18 @@ class TestMxGemmUtil : public ::testing::Test
                                             scale_m,
                                             scale_n);
 
-        if constexpr(!GemmConfig::Preshuffle)
-        {
-            mx_gemm_calc<GemmConfig,
-                         ADataType,
-                         BDataType,
-                         AccDataType,
-                         CDataType,
-                         ALayout,
-                         BLayout,
-                         CLayout,
-                         ScaleM,
-                         ScaleN,
-                         true,
-                         false>(args,
-                                ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
-        }
-        else
-        {
-            using GemmShape = ck_tile::TileGemmShape<
-                ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
-                ck_tile::sequence<GemmConfig::M_Warp, GemmConfig::N_Warp, GemmConfig::K_Warp>,
-                ck_tile::sequence<GemmConfig::M_Warp_Tile,
-                                  GemmConfig::N_Warp_Tile,
-                                  GemmConfig::K_Warp_Tile>>;
-            using TilePartitioner =
-                ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
-                                                           GemmConfig::TileParitionerGroupNum,
-                                                           GemmConfig::TileParitionerM01>;
-
-            const ck_tile::index_t k_pad =
-                (K + GemmConfig::K_Tile - 1) / GemmConfig::K_Tile * GemmConfig::K_Tile;
-            const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(k_pad);
-            const bool has_hot_loop =
-                ck_tile::BaseMXGemmPipelineAGmemBGmemCRegV1::BlockHasHotloop(num_loop);
-            const ck_tile::TailNumber tail_num =
-                ck_tile::BaseMXGemmPipelineAGmemBGmemCRegV1::GetBlockLoopTailNum(num_loop);
-
-            ck_tile::BaseMXGemmPipelineAGmemBGmemCRegV1::template TailHandler<true>(
-                [&](auto has_hot_loop_, auto tail_num_) {
-                    constexpr auto has_hot_loop_v = has_hot_loop_.value;
-                    constexpr auto tail_num_v     = tail_num_.value;
-
-                    return mx_gemm_calc<GemmConfig,
-                                        ADataType,
-                                        BDataType,
-                                        AccDataType,
-                                        CDataType,
-                                        ALayout,
-                                        BLayout,
-                                        CLayout,
-                                        ScaleM,
-                                        ScaleN,
-                                        true,
-                                        false,
-                                        has_hot_loop_v,
-                                        tail_num_v>(
-                        args, ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
-                },
-                has_hot_loop,
-                tail_num);
-        }
+        mx_gemm_calc<GemmConfig,
+                     ADataType,
+                     BDataType,
+                     AccDataType,
+                     CDataType,
+                     ALayout,
+                     BLayout,
+                     CLayout,
+                     ScaleM,
+                     ScaleN,
+                     true,
+                     false>(args, ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
 
         c_dev_buf.FromDevice(c_host.data());
 

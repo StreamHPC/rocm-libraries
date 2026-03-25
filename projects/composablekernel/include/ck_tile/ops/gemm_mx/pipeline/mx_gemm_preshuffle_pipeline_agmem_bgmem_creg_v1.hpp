@@ -8,54 +8,9 @@
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_base.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_agmem_bgmem_creg_v1.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
-#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_pipeline_agmem_bgmem_creg_v1_policy.hpp"
+#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_preshuffle_pipeline_agmem_bgmem_creg_v1_policy.hpp"
 
 namespace ck_tile {
-
-// The preshuffle path still needs a two-stage head/hotloop/tail controller because B and the
-// MX scales are consumed in ping-pong fashion. The standard compute-async path in gemm_mx uses
-// One/Two/Three tails; this pipeline uses an Even/Odd tail split that matches the paired
-// prefetch/compute cadence of the preshuffled layout.
-struct BaseMXGemmPipelineAGmemBGmemCRegV1
-{
-    static constexpr index_t PrefetchStages = 2;
-
-    CK_TILE_HOST static constexpr bool BlockHasHotloop(index_t num_loop)
-    {
-        return num_loop > PrefetchStages;
-    }
-
-    CK_TILE_HOST static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
-    {
-        return num_loop % 2 == 0 ? TailNumber::Even : TailNumber::Odd;
-    }
-
-    template <bool DispatchHotloop = false, TailNumber tail_num, typename RunFunction>
-    CK_TILE_HOST_DEVICE static auto TailHandler(const RunFunction& run_func, bool has_hot_loop)
-    {
-        if constexpr(!DispatchHotloop)
-            return run_func(bool_constant<true>{}, integral_constant<TailNumber, tail_num>{});
-        else if(has_hot_loop)
-            return run_func(bool_constant<true>{}, integral_constant<TailNumber, tail_num>{});
-        else
-            return run_func(bool_constant<false>{}, integral_constant<TailNumber, tail_num>{});
-    }
-
-    template <bool DispatchHotloop = false, typename RunFunction>
-    CK_TILE_HOST_DEVICE static auto
-    TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_num)
-    {
-        if(TailNumber::Even == tail_num)
-            return TailHandler<DispatchHotloop, TailNumber::Even>(run_func, has_hot_loop);
-        else if(TailNumber::Odd == tail_num)
-            return TailHandler<DispatchHotloop, TailNumber::Odd>(run_func, has_hot_loop);
-        else
-        {
-            assert(false && "Wrong TailNumber!");
-            return TailHandler<DispatchHotloop, TailNumber::Even>(run_func, has_hot_loop);
-        }
-    }
-};
 
 template <typename ADataType_,
           typename BDataType_,
@@ -73,18 +28,18 @@ template <typename ADataType_,
           bool FixedVectorSize_                 = false,
           index_t VectorSizeA_                  = 1,
           index_t VectorSizeB_                  = 1>
-struct MXGemmPipelineProblem : UniversalGemmPipelineProblem<ADataType_,
-                                                            BDataType_,
-                                                            CDataType_,
-                                                            BlockGemmShape_,
-                                                            Traits_,
-                                                            Scheduler_,
-                                                            AElementWise_,
-                                                            BElementWise_,
-                                                            ComputeDataType_,
-                                                            FixedVectorSize_,
-                                                            VectorSizeA_,
-                                                            VectorSizeB_>
+struct MXGemmPreshufflePipelineProblem : UniversalGemmPipelineProblem<ADataType_,
+                                                                      BDataType_,
+                                                                      CDataType_,
+                                                                      BlockGemmShape_,
+                                                                      Traits_,
+                                                                      Scheduler_,
+                                                                      AElementWise_,
+                                                                      BElementWise_,
+                                                                      ComputeDataType_,
+                                                                      FixedVectorSize_,
+                                                                      VectorSizeA_,
+                                                                      VectorSizeB_>
 {
     using BlockGemmShape = BlockGemmShape_;
 
@@ -106,12 +61,15 @@ struct MXGemmPipelineProblem : UniversalGemmPipelineProblem<ADataType_,
 // The core MFMA schedule is shared with the earlier prototype, but the public type surface is
 // now a native gemm_mx pipeline that plugs into the regular GEMM problem traits.
 template <typename Problem, typename PipelinePolicy = MXGemmPipelineAgBgCrPolicy>
-struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, PipelinePolicy>
+struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
+    : GemmPipelineAGmemBGmemCRegV1<Problem, PipelinePolicy>
 {
-    using ADataType      = remove_cvref_t<typename Problem::ADataType>;
-    using BDataType      = remove_cvref_t<typename Problem::BDataType>;
-    using CDataType      = remove_cvref_t<typename Problem::CDataType>;
-    using BlockGemmShape = remove_cvref_t<typename Problem::BlockGemmShape>;
+    using Base             = BaseWeightPreshufflePipelineAGmemBGmemCRegV2<Problem>;
+    using PipelineImplBase = GemmPipelineAgBgCrImplBase<Problem, PipelinePolicy>;
+    using ADataType        = remove_cvref_t<typename Problem::ADataType>;
+    using BDataType        = remove_cvref_t<typename Problem::BDataType>;
+    using CDataType        = remove_cvref_t<typename Problem::CDataType>;
+    using BlockGemmShape   = remove_cvref_t<typename Problem::BlockGemmShape>;
 
     using ComputeType = ADataType;
     static_assert(sizeof(ADataType) >= sizeof(BDataType));
@@ -119,6 +77,11 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
     using ALayout = remove_cvref_t<typename Problem::ALayout>;
     using BLayout = remove_cvref_t<typename Problem::BLayout>;
     using CLayout = remove_cvref_t<typename Problem::CLayout>;
+
+    static_assert(!std::is_same_v<ADataType, pk_fp6x16_t> &&
+                      !std::is_same_v<BDataType, pk_fp6x16_t>,
+                  "fp6 is not enabled for the mx_gemm preshuffle pipeline until AK1/BK1 scheduling "
+                  "is wired through consistently.");
 
     static constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
     static constexpr index_t BPackedSize = numeric_traits<BDataType>::PackedSize;
@@ -153,6 +116,7 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
 
     static constexpr index_t NumWaveGroups    = Problem::NumWaveGroups;
     static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
+    static constexpr auto Scheduler           = GemmPipelineScheduler::Intrawave;
 
     static constexpr auto I0   = number<0>();
     static constexpr auto I1   = number<1>();
@@ -192,9 +156,6 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
                                              ? DsReadPreload
                                              : MIterPerWarp * KIterPerWarp;
 
-    static constexpr bool HasHotLoop = Problem::HasHotLoop;
-    static constexpr auto TailNum    = Problem::TailNum;
-
     static constexpr index_t mfma_per_wg = 1;
 
     static constexpr index_t dsread_per_wg = WG::kM * WG::kK / AK1 / WaveSize;
@@ -213,8 +174,11 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
     static constexpr index_t ScaleAload_num =
         kMPerBlock * kKPerBlock / MWarp / ScaleGranularityK / MXdlPack / KXdlPack / WaveSize;
 
-    static constexpr index_t HalfMIter = (MIterPerWarp + 1) / 2;
-    static constexpr index_t Bload_rep = (Bload_num_perK + HalfMIter - 1) / HalfMIter;
+    static constexpr index_t HalfMIter        = (MIterPerWarp + 1) / 2;
+    static constexpr index_t Bload_rep        = (Bload_num_perK + HalfMIter - 1) / HalfMIter;
+    static constexpr index_t MPackIterPerWarp = MIterPerWarp / MXdlPack;
+    static constexpr index_t NPackIterPerWarp = NIterPerWarp / NXdlPack;
+    static constexpr index_t KPackIterPerWarp = KIterPerWarp / KXdlPack;
 
     static constexpr index_t mfma_perM_perK = NIterPerWarp * mfma_per_wg;
     static constexpr index_t dswrite_mIter  = (DsWritePreIssue - 1) % MIterPerWarp;
@@ -222,6 +186,83 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
 
     static constexpr bool DoubleSmemBuffer = false;
     static constexpr bool Preshuffle       = true;
+
+    template <typename CWarpTensors,
+              typename AWarpTensor,
+              typename BWarpTensors,
+              typename ScaleATileTensors,
+              typename ScaleBTileTensors,
+              typename AWarpWindow>
+    CK_TILE_DEVICE static void RunBlockGemmStep_(CWarpTensors& c_warp_tensors,
+                                                 AWarpTensor& a_warp_tensor,
+                                                 const BWarpTensors& b_warp_tensors,
+                                                 const ScaleATileTensors& scale_a_tile_tensors,
+                                                 const ScaleBTileTensors& scale_b_tile_tensors,
+                                                 const AWarpWindow& a_warp_window)
+    {
+        static_for_product<number<KPackIterPerWarp>,
+                           number<MPackIterPerWarp>,
+                           number<NPackIterPerWarp>,
+                           number<KXdlPack>,
+                           number<MXdlPack>,
+                           number<NXdlPack>>{}(
+            [&](auto ikpack, auto impack, auto inpack, auto ikxdl, auto imxdl, auto inxdl) {
+                constexpr auto m_iter    = impack * MXdlPack + imxdl;
+                constexpr auto n_iter    = inpack * NXdlPack + inxdl;
+                constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
+                constexpr auto APackIter = ikxdl * MXdlPack + imxdl;
+                WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
+                    c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
+                    bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
+                    bit_cast<typename WG::BWarpTensor>(
+                        b_warp_tensors(number<n_iter>{})(number<k_iter>{})),
+                    scale_a_tile_tensors(impack)(ikpack).get_thread_buffer()[0],
+                    scale_b_tile_tensors(inpack)(ikpack).get_thread_buffer()[0]);
+                constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
+                if constexpr(addr < (KIterPerWarp * MIterPerWarp) && (n_iter == NIterPerWarp - 1))
+                {
+                    constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
+                    constexpr auto AkIter              = addr / 2 % 2;
+                    a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
+                        a_warp_window,
+                        tuple<number<AmIter * WG::kM>,
+                              number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
+                }
+            });
+    }
+
+    template <GemmPipelineScheduler>
+    struct PipelineImpl
+    {
+    };
+
+    template <>
+    struct PipelineImpl<GemmPipelineScheduler::Intrawave>
+    {
+        template <bool HasHotLoop,
+                  TailNumber TailNum,
+                  typename ADramBlockWindowTmp,
+                  typename BFlatBlockWindowTmp,
+                  typename ScaleADramBlockWindowTmp,
+                  typename ScaleBDramBlockWindowTmp>
+        CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_copy_dram_window_tmp,
+                                       const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
+                                       const ScaleADramBlockWindowTmp& scale_a_window,
+                                       const ScaleBDramBlockWindowTmp& scale_b_window,
+                                       index_t num_loop,
+                                       void* __restrict__ p_smem_ping,
+                                       void* __restrict__ p_smem_pong) const
+        {
+            return MXGemmPreshufflePipelineAGmemBGmemCRegV1::template RunImpl_<HasHotLoop, TailNum>(
+                a_copy_dram_window_tmp,
+                b_flat_dram_block_window_tmp,
+                scale_a_window,
+                scale_b_window,
+                num_loop,
+                p_smem_ping,
+                p_smem_pong);
+        }
+    };
 
     CK_TILE_HOST_DEVICE static constexpr auto
     SchedulerPerM(index_t dsread_perM, index_t dswrite_perM, index_t load_perM)
@@ -417,10 +458,11 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
         }
     }
 
-    template <typename... Args>
-    CK_TILE_DEVICE auto operator()(Args&&... args) const
+    template <bool HasHotLoop, TailNumber TailNum, typename... Args>
+    CK_TILE_DEVICE static auto RunPipeline_(Args&&... args)
     {
-        auto c_warp_tensors = Run_(std::forward<Args>(args)...);
+        auto c_warp_tensors = PipelineImpl<Scheduler>{}.template operator()<HasHotLoop, TailNum>(
+            std::forward<Args>(args)...);
 
         using CWarpDstr = typename WG::CWarpDstr;
         constexpr auto c_warp_y_lengths =
@@ -442,13 +484,43 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
               typename BFlatBlockWindowTmp,
               typename ScaleADramBlockWindowTmp,
               typename ScaleBDramBlockWindowTmp>
-    CK_TILE_DEVICE auto Run_(const ADramBlockWindowTmp& a_copy_dram_window_tmp,
-                             const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
-                             const ScaleADramBlockWindowTmp& scale_a_window,
-                             const ScaleBDramBlockWindowTmp& scale_b_window,
-                             index_t num_loop,
-                             void* __restrict__ p_smem_ping,
-                             void* __restrict__ p_smem_pong) const
+    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_copy_dram_window_tmp,
+                                   const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
+                                   const ScaleADramBlockWindowTmp& scale_a_window,
+                                   const ScaleBDramBlockWindowTmp& scale_b_window,
+                                   index_t num_loop,
+                                   void* __restrict__ p_smem_ping,
+                                   void* __restrict__ p_smem_pong) const
+    {
+        const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
+        const auto tail_num     = Base::GetBlockLoopTailNum(num_loop);
+
+        const auto RunPipeline = [&](auto hot_loop_, auto tail_num_) {
+            return RunPipeline_<hot_loop_.value, tail_num_.value>(a_copy_dram_window_tmp,
+                                                                  b_flat_dram_block_window_tmp,
+                                                                  scale_a_window,
+                                                                  scale_b_window,
+                                                                  num_loop,
+                                                                  p_smem_ping,
+                                                                  p_smem_pong);
+        };
+
+        return Base::TailHandler(RunPipeline, has_hot_loop, tail_num);
+    }
+
+    template <bool HasHotLoop,
+              TailNumber TailNum,
+              typename ADramBlockWindowTmp,
+              typename BFlatBlockWindowTmp,
+              typename ScaleADramBlockWindowTmp,
+              typename ScaleBDramBlockWindowTmp>
+    CK_TILE_DEVICE static auto RunImpl_(const ADramBlockWindowTmp& a_copy_dram_window_tmp,
+                                        const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
+                                        const ScaleADramBlockWindowTmp& scale_a_window,
+                                        const ScaleBDramBlockWindowTmp& scale_b_window,
+                                        index_t num_loop,
+                                        void* __restrict__ p_smem_ping,
+                                        void* __restrict__ p_smem_pong)
     {
 #ifndef __gfx950__
         static_assert(false, "Only gfx950 is supported for MXFP4 Gemm pipeline now.");
@@ -468,6 +540,9 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
 
         auto a_dram_window = PipelinePolicy::template MakeMX_AAsyncLoadBytesDramWindow<Problem>(
             a_copy_dram_window_tmp);
+        using ADramTileWindowStep = typename ADramBlockWindowTmp::BottomTensorIndex;
+        constexpr ADramTileWindowStep a_dram_tile_window_step =
+            make_array(index_t{0}, index_t{kKPerBlock * sizeof(ADataType) / APackedSize});
 
         __builtin_amdgcn_sched_barrier(0);
 
@@ -541,10 +616,6 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
         const auto scale_b_dram_step_k = amd_wave_read_first_lane(
             scale_b_dram_window.get_load_offset(tuple<number<0>, number<64 / WG::kN>>{}));
 
-        constexpr index_t MPackIterPerWarp = MIterPerWarp / MXdlPack;
-        constexpr index_t NPackIterPerWarp = NIterPerWarp / NXdlPack;
-        constexpr index_t KPackIterPerWarp = KIterPerWarp / KXdlPack;
-
         statically_indexed_array<
             statically_indexed_array<decltype(load_tile(scale_a_dram_window)), KPackIterPerWarp>,
             MPackIterPerWarp>
@@ -554,12 +625,8 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
             NPackIterPerWarp>
             scale_b_tile_tensor_ping, scale_b_tile_tensor_pong;
 
-        auto async_load_tile_ = [](auto lds, auto dram) {
-            async_load_tile(lds, dram, number<-1>{}, true_type{}, true_type{});
-        };
-
-        async_load_tile_(a_store_lds_window_ping, a_dram_window);
-        move_tile_window(a_dram_window, {0, kKPerBlock * sizeof(ADataType) / APackedSize});
+        PipelineImplBase{}.GlobalPrefetchAsync(
+            a_store_lds_window_ping, a_dram_window, a_dram_tile_window_step);
 
         static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
@@ -592,8 +659,8 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
 
         if constexpr(HasHotLoop || TailNum == TailNumber::Even)
         {
-            async_load_tile_(a_store_lds_window_pong, a_dram_window);
-            move_tile_window(a_dram_window, {0, sizeof(ADataType) * kKPerBlock / APackedSize});
+            PipelineImplBase{}.GlobalPrefetchAsync(
+                a_store_lds_window_pong, a_dram_window, a_dram_tile_window_step);
         }
 
         statically_indexed_array<statically_indexed_array<CWarpTensor, NIterPerWarp>, MIterPerWarp>
@@ -645,41 +712,17 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
                 });
             });
 
-            static_for_product<number<KPackIterPerWarp>,
-                               number<MPackIterPerWarp>,
-                               number<NPackIterPerWarp>,
-                               number<KXdlPack>,
-                               number<MXdlPack>,
-                               number<NXdlPack>>{}(
-                [&](auto ikpack, auto impack, auto inpack, auto ikxdl, auto imxdl, auto inxdl) {
-                    constexpr auto n_iter    = inpack * NXdlPack + inxdl;
-                    constexpr auto m_iter    = impack * MXdlPack + imxdl;
-                    constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
-                    constexpr auto APackIter = ikxdl * MXdlPack + imxdl;
-                    WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
-                        c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
-                        bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
-                        bit_cast<typename WG::BWarpTensor>(
-                            b_warp_tensor_ping(number<n_iter>{})(number<k_iter>{})),
-                        scale_a_tile_tensor_ping(impack)(ikpack).get_thread_buffer()[0],
-                        scale_b_tile_tensor_ping(inpack)(ikpack).get_thread_buffer()[0]);
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
-                                 (n_iter == NIterPerWarp - 1))
-                    {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
-                        a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
-                            a_warp_window_ping,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                    }
-                });
+            RunBlockGemmStep_(c_warp_tensors,
+                              a_warp_tensor,
+                              b_warp_tensor_ping,
+                              scale_a_tile_tensor_ping,
+                              scale_b_tile_tensor_ping,
+                              a_warp_window_ping);
             s_waitcnt<Bload_num + ScaleAload_num + ScaleBload_num>();
             block_sync_lds();
 
-            async_load_tile_(a_store_lds_window_ping, a_dram_window);
-            move_tile_window(a_dram_window, {0, kKPerBlock * sizeof(ADataType) / APackedSize});
+            PipelineImplBase{}.GlobalPrefetchAsync(
+                a_store_lds_window_ping, a_dram_window, a_dram_tile_window_step);
 
             move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
             move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
@@ -720,41 +763,17 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
                 });
             });
 
-            static_for_product<number<KPackIterPerWarp>,
-                               number<MPackIterPerWarp>,
-                               number<NPackIterPerWarp>,
-                               number<KXdlPack>,
-                               number<MXdlPack>,
-                               number<NXdlPack>>{}(
-                [&](auto ikpack, auto impack, auto inpack, auto ikxdl, auto imxdl, auto inxdl) {
-                    constexpr auto m_iter    = impack * MXdlPack + imxdl;
-                    constexpr auto n_iter    = inpack * NXdlPack + inxdl;
-                    constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
-                    constexpr auto APackIter = ikxdl * MXdlPack + imxdl;
-                    WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
-                        c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
-                        bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
-                        bit_cast<typename WG::BWarpTensor>(
-                            b_warp_tensor_pong(number<n_iter>{})(number<k_iter>{})),
-                        scale_a_tile_tensor_pong(impack)(ikpack).get_thread_buffer()[0],
-                        scale_b_tile_tensor_pong(inpack)(ikpack).get_thread_buffer()[0]);
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
-                                 (n_iter == NIterPerWarp - 1))
-                    {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
-                        a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
-                            a_warp_window_pong,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                    }
-                });
+            RunBlockGemmStep_(c_warp_tensors,
+                              a_warp_tensor,
+                              b_warp_tensor_pong,
+                              scale_a_tile_tensor_pong,
+                              scale_b_tile_tensor_pong,
+                              a_warp_window_pong);
             s_waitcnt<Bload_num + ScaleAload_num + ScaleBload_num>();
             block_sync_lds();
 
-            async_load_tile_(a_store_lds_window_pong, a_dram_window);
-            move_tile_window(a_dram_window, {0, sizeof(ADataType) * kKPerBlock / APackedSize});
+            PipelineImplBase{}.GlobalPrefetchAsync(
+                a_store_lds_window_pong, a_dram_window, a_dram_tile_window_step);
             move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
             move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
 
@@ -803,36 +822,12 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
                 });
             });
 
-            static_for_product<number<KPackIterPerWarp>,
-                               number<MPackIterPerWarp>,
-                               number<NPackIterPerWarp>,
-                               number<KXdlPack>,
-                               number<MXdlPack>,
-                               number<NXdlPack>>{}(
-                [&](auto ikpack, auto impack, auto inpack, auto ikxdl, auto imxdl, auto inxdl) {
-                    constexpr auto m_iter    = impack * MXdlPack + imxdl;
-                    constexpr auto n_iter    = inpack * NXdlPack + inxdl;
-                    constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
-                    constexpr auto APackIter = ikxdl * MXdlPack + imxdl;
-                    WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
-                        c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
-                        bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
-                        bit_cast<typename WG::BWarpTensor>(
-                            b_warp_tensor_ping(number<n_iter>{})(number<k_iter>{})),
-                        scale_a_tile_tensor_ping(impack)(ikpack).get_thread_buffer()[0],
-                        scale_b_tile_tensor_ping(inpack)(ikpack).get_thread_buffer()[0]);
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
-                                 (n_iter == NIterPerWarp - 1))
-                    {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
-                        a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
-                            a_warp_window_ping,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                    }
-                });
+            RunBlockGemmStep_(c_warp_tensors,
+                              a_warp_tensor,
+                              b_warp_tensor_ping,
+                              scale_a_tile_tensor_ping,
+                              scale_b_tile_tensor_ping,
+                              a_warp_window_ping);
             s_waitcnt<Bload_num + ScaleAload_num + ScaleBload_num>();
             block_sync_lds();
 
@@ -847,70 +842,22 @@ struct MXGemmPipelineAGmemBGmemCRegV1 : GemmPipelineAGmemBGmemCRegV1<Problem, Pi
 
             Last2ndHotLoopScheduler();
 
-            static_for_product<number<KPackIterPerWarp>,
-                               number<MPackIterPerWarp>,
-                               number<NPackIterPerWarp>,
-                               number<KXdlPack>,
-                               number<MXdlPack>,
-                               number<NXdlPack>>{}(
-                [&](auto ikpack, auto impack, auto inpack, auto ikxdl, auto imxdl, auto inxdl) {
-                    constexpr auto m_iter    = impack * MXdlPack + imxdl;
-                    constexpr auto n_iter    = inpack * NXdlPack + inxdl;
-                    constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
-                    constexpr auto APackIter = ikxdl * MXdlPack + imxdl;
-                    WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
-                        c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
-                        bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
-                        bit_cast<typename WG::BWarpTensor>(
-                            b_warp_tensor_pong(number<n_iter>{})(number<k_iter>{})),
-                        scale_a_tile_tensor_pong(impack)(ikpack).get_thread_buffer()[0],
-                        scale_b_tile_tensor_pong(inpack)(ikpack).get_thread_buffer()[0]);
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
-                                 (n_iter == NIterPerWarp - 1))
-                    {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
-                        a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
-                            a_warp_window_pong,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                    }
-                });
+            RunBlockGemmStep_(c_warp_tensors,
+                              a_warp_tensor,
+                              b_warp_tensor_pong,
+                              scale_a_tile_tensor_pong,
+                              scale_b_tile_tensor_pong,
+                              a_warp_window_pong);
             LastHotLoopScheduler();
         }
         else if constexpr(TailNum == TailNumber::Odd)
         {
-            static_for_product<number<KPackIterPerWarp>,
-                               number<MPackIterPerWarp>,
-                               number<NPackIterPerWarp>,
-                               number<KXdlPack>,
-                               number<MXdlPack>,
-                               number<NXdlPack>>{}(
-                [&](auto ikpack, auto impack, auto inpack, auto ikxdl, auto imxdl, auto inxdl) {
-                    constexpr auto m_iter    = impack * MXdlPack + imxdl;
-                    constexpr auto n_iter    = inpack * NXdlPack + inxdl;
-                    constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
-                    constexpr auto APackIter = ikxdl * MXdlPack + imxdl;
-                    WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
-                        c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
-                        bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
-                        bit_cast<typename WG::BWarpTensor>(
-                            b_warp_tensor_ping(number<n_iter>{})(number<k_iter>{})),
-                        scale_a_tile_tensor_ping(impack)(ikpack).get_thread_buffer()[0],
-                        scale_b_tile_tensor_ping(inpack)(ikpack).get_thread_buffer()[0]);
-                    constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                    if constexpr(addr < (KIterPerWarp * MIterPerWarp) &&
-                                 (n_iter == NIterPerWarp - 1))
-                    {
-                        constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                        constexpr auto AkIter              = addr / 2 % 2;
-                        a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
-                            a_warp_window_ping,
-                            tuple<number<AmIter * WG::kM>,
-                                  number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                    }
-                });
+            RunBlockGemmStep_(c_warp_tensors,
+                              a_warp_tensor,
+                              b_warp_tensor_ping,
+                              scale_a_tile_tensor_ping,
+                              scale_b_tile_tensor_ping,
+                              a_warp_window_ping);
             LastHotLoopScheduler();
         }
         else
