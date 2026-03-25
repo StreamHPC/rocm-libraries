@@ -3,15 +3,12 @@
 
 #include <hip/hip_runtime.h>
 
-#include <algorithm>
 #include <cstring>
 #include <iostream>
-#include <memory>
 #include <ostream>
 #include <string>
 #include <tuple>
 #include <type_traits>
-#include <vector>
 
 #include "ck_tile/host.hpp"
 #include "mx_gemm.hpp"
