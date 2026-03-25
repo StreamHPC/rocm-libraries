@@ -225,20 +225,10 @@ class TestMxGemmUtil : public ::testing::Test
             packScalesMNxK<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_a_host, true);
         auto scale_b_packed =
             packScalesMNxK<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_b_host, false);
-        const auto scale_a_bytes = [&]() {
-            if constexpr(GemmConfig::Preshuffle)
-                return scale_a_host_for_device.get_element_space_size_in_bytes();
-            else
-                return scale_a_packed.size() * sizeof(int32_t);
-        }();
-        const auto scale_b_bytes = [&]() {
-            if constexpr(GemmConfig::Preshuffle)
-                return scale_b_host_for_device.get_element_space_size_in_bytes();
-            else
-                return scale_b_packed.size() * sizeof(int32_t);
-        }();
-        ck_tile::DeviceMem scale_a_dev_buf(scale_a_bytes);
-        ck_tile::DeviceMem scale_b_dev_buf(scale_b_bytes);
+        ck_tile::DeviceMem scale_a_dev_buf(
+            scale_a_host_for_device.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem scale_b_dev_buf(
+            scale_b_host_for_device.get_element_space_size_in_bytes());
 
         a_dev_buf.ToDevice(a_host.data());
         b_dev_buf.ToDevice(b_host_for_device.data());

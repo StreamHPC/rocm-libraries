@@ -58,8 +58,6 @@ struct MXGemmPreshufflePipelineProblem : UniversalGemmPipelineProblem<ADataType_
 };
 
 // This pipeline extends the existing universal GEMM machinery with preshuffled-B support.
-// The core MFMA schedule is shared with the earlier prototype, but the public type surface is
-// now a native gemm_mx pipeline that plugs into the regular GEMM problem traits.
 template <typename Problem, typename PipelinePolicy = MXGemmPipelineAgBgCrPolicy>
 struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     : GemmPipelineAGmemBGmemCRegV1<Problem, PipelinePolicy>
@@ -93,10 +91,8 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     using WG = remove_cvref_t<decltype(config.template at<0>())>;
 
     static constexpr index_t DsWritePreIssue = 3;
-    static constexpr index_t DsReadPreload   = 4;
-
-    static constexpr index_t BlockSize = Problem::kBlockSize;
-    static constexpr index_t WaveSize  = get_warp_size();
+    static constexpr index_t BlockSize       = Problem::kBlockSize;
+    static constexpr index_t WaveSize        = get_warp_size();
 
     static constexpr index_t kMPerBlock = BlockGemmShape::kM;
     static constexpr index_t kNPerBlock = BlockGemmShape::kN;
@@ -105,7 +101,8 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr index_t flatKPerWarp = BlockGemmShape::flatKPerWarp;
     static constexpr index_t flatNPerWarp = BlockGemmShape::flatNPerWarp;
 
-    // The preshuffled layout fixes A/B vector widths at 32 bytes; C keeps the regular vector size.
+    // The preshuffled layout fixes A/B vector widths at 32 bytes
+    // C keeps the regular vector size.
     static constexpr index_t GetVectorSizeA() { return 32; }
     static constexpr index_t GetVectorSizeB() { return 32; }
     static constexpr index_t GetVectorSizeC() { return Problem::VectorSizeC; }
@@ -147,14 +144,10 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr index_t KXdlPack          = Problem::KXdlPack;
     static constexpr index_t ScaleGranularityK = Problem::ScaleGranularityK;
 
-    static constexpr index_t AK1 =
-        std::is_same_v<ADataType, pk_fp6x16_t> ? 16 : 16 * APackedSize / sizeof(ADataType);
-    static constexpr index_t BK1 =
-        std::is_same_v<BDataType, pk_fp6x16_t> ? 16 : 16 * BPackedSize / sizeof(BDataType);
+    static constexpr index_t AK1 = 16 * APackedSize / sizeof(ADataType);
+    static constexpr index_t BK1 = 16 * BPackedSize / sizeof(BDataType);
 
-    static constexpr index_t m_preload = (MIterPerWarp * KIterPerWarp >= DsReadPreload)
-                                             ? DsReadPreload
-                                             : MIterPerWarp * KIterPerWarp;
+    static constexpr index_t m_preload = BlockGemm::m_preload;
 
     static constexpr index_t mfma_per_wg = 1;
 
@@ -186,50 +179,6 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
 
     static constexpr bool DoubleSmemBuffer = false;
     static constexpr bool Preshuffle       = true;
-
-    template <typename CWarpTensors,
-              typename AWarpTensor,
-              typename BWarpTensors,
-              typename ScaleATileTensors,
-              typename ScaleBTileTensors,
-              typename AWarpWindow>
-    CK_TILE_DEVICE static void RunBlockGemmStep_(CWarpTensors& c_warp_tensors,
-                                                 AWarpTensor& a_warp_tensor,
-                                                 const BWarpTensors& b_warp_tensors,
-                                                 const ScaleATileTensors& scale_a_tile_tensors,
-                                                 const ScaleBTileTensors& scale_b_tile_tensors,
-                                                 const AWarpWindow& a_warp_window)
-    {
-        static_for_product<number<KPackIterPerWarp>,
-                           number<MPackIterPerWarp>,
-                           number<NPackIterPerWarp>,
-                           number<KXdlPack>,
-                           number<MXdlPack>,
-                           number<NXdlPack>>{}(
-            [&](auto ikpack, auto impack, auto inpack, auto ikxdl, auto imxdl, auto inxdl) {
-                constexpr auto m_iter    = impack * MXdlPack + imxdl;
-                constexpr auto n_iter    = inpack * NXdlPack + inxdl;
-                constexpr auto k_iter    = ikpack * KXdlPack + ikxdl;
-                constexpr auto APackIter = ikxdl * MXdlPack + imxdl;
-                WG{}.template operator()<APackIter, ikxdl * NXdlPack + inxdl>(
-                    c_warp_tensors(number<m_iter>{})(number<n_iter>{}),
-                    bit_cast<typename WG::AWarpTensor>(a_warp_tensor(number<APackIter>{})),
-                    bit_cast<typename WG::BWarpTensor>(
-                        b_warp_tensors(number<n_iter>{})(number<k_iter>{})),
-                    scale_a_tile_tensors(impack)(ikpack).get_thread_buffer()[0],
-                    scale_b_tile_tensors(inpack)(ikpack).get_thread_buffer()[0]);
-                constexpr auto addr = m_iter % 2 + k_iter * 2 + m_iter / 2 * 4 + m_preload;
-                if constexpr(addr < (KIterPerWarp * MIterPerWarp) && (n_iter == NIterPerWarp - 1))
-                {
-                    constexpr auto AmIter              = addr % 2 + addr / 4 * 2;
-                    constexpr auto AkIter              = addr / 2 % 2;
-                    a_warp_tensor(number<APackIter>{}) = load_tile_with_offset(
-                        a_warp_window,
-                        tuple<number<AmIter * WG::kM>,
-                              number<sizeof(ADataType) * AkIter * WG::kK / APackedSize>>{});
-                }
-            });
-    }
 
     template <GemmPipelineScheduler>
     struct PipelineImpl
@@ -594,8 +543,6 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
             NIterPerWarp>
             b_warp_tensor_ping, b_warp_tensor_pong;
 
-        // Scale A follows the flattened K traversal, while Scale B reuses the regular MX GEMM
-        // packing. That split is intentional: it matches the way preshuffled B is consumed.
         auto scale_a_dram_window = make_tile_window(
             scale_a_window.get_bottom_tensor_view(),
             make_tuple(number<MWarp * WG::kM>{}, number<64 / WG::kM>{}),
@@ -669,18 +616,18 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
             static_for<0, NIterPerWarp, 1>{}(
                 [&](auto nIter) { clear_tile(c_warp_tensors(mIter)(nIter)); });
         });
-
-        statically_indexed_array<decltype(load_tile(a_warp_window_pong)), m_preload> a_warp_tensor;
+        BlockGemm block_gemm;
 
         s_waitcnt_barrier<Bload_num + ScaleAload_num + ScaleBload_num>();
         static_for<0, m_preload, 1>{}([&](auto loadIter) {
             constexpr auto mIter = loadIter % MXdlPack;
             constexpr auto kIter = loadIter / MXdlPack;
 
-            a_warp_tensor(loadIter) = load_tile_with_offset(
-                a_warp_window_ping,
-                tuple<number<mIter * WG::kM>,
-                      number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{});
+            block_gemm.preloaded_a_warp_tensor(loadIter) =
+                bit_cast<typename BlockGemm::AWarpTensor>(load_tile_with_offset(
+                    a_warp_window_ping,
+                    tuple<number<mIter * WG::kM>,
+                          number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{}));
         });
         __builtin_amdgcn_sched_barrier(0);
 
@@ -712,12 +659,11 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                 });
             });
 
-            RunBlockGemmStep_(c_warp_tensors,
-                              a_warp_tensor,
-                              b_warp_tensor_ping,
-                              scale_a_tile_tensor_ping,
-                              scale_b_tile_tensor_ping,
-                              a_warp_window_ping);
+            block_gemm(c_warp_tensors,
+                       b_warp_tensor_ping,
+                       scale_a_tile_tensor_ping,
+                       scale_b_tile_tensor_ping,
+                       a_warp_window_ping);
             s_waitcnt<Bload_num + ScaleAload_num + ScaleBload_num>();
             block_sync_lds();
 
@@ -728,12 +674,13 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
             move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
 
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
-                constexpr auto mIter    = loadIter % MXdlPack;
-                constexpr auto kIter    = loadIter / MXdlPack;
-                a_warp_tensor(loadIter) = load_tile_with_offset(
-                    a_warp_window_pong,
-                    tuple<number<mIter * WG::kM>,
-                          number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{});
+                constexpr auto mIter = loadIter % MXdlPack;
+                constexpr auto kIter = loadIter / MXdlPack;
+                block_gemm.preloaded_a_warp_tensor(loadIter) =
+                    bit_cast<typename BlockGemm::AWarpTensor>(load_tile_with_offset(
+                        a_warp_window_pong,
+                        tuple<number<mIter * WG::kM>,
+                              number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{}));
             });
             HotLoopScheduler();
 
@@ -763,12 +710,11 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                 });
             });
 
-            RunBlockGemmStep_(c_warp_tensors,
-                              a_warp_tensor,
-                              b_warp_tensor_pong,
-                              scale_a_tile_tensor_pong,
-                              scale_b_tile_tensor_pong,
-                              a_warp_window_pong);
+            block_gemm(c_warp_tensors,
+                       b_warp_tensor_pong,
+                       scale_a_tile_tensor_pong,
+                       scale_b_tile_tensor_pong,
+                       a_warp_window_pong);
             s_waitcnt<Bload_num + ScaleAload_num + ScaleBload_num>();
             block_sync_lds();
 
@@ -778,12 +724,13 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
             move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
 
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
-                constexpr auto mIter    = loadIter % MXdlPack;
-                constexpr auto kIter    = loadIter / MXdlPack;
-                a_warp_tensor(loadIter) = load_tile_with_offset(
-                    a_warp_window_ping,
-                    tuple<number<mIter * WG::kM>,
-                          number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{});
+                constexpr auto mIter = loadIter % MXdlPack;
+                constexpr auto kIter = loadIter / MXdlPack;
+                block_gemm.preloaded_a_warp_tensor(loadIter) =
+                    bit_cast<typename BlockGemm::AWarpTensor>(load_tile_with_offset(
+                        a_warp_window_ping,
+                        tuple<number<mIter * WG::kM>,
+                              number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{}));
             });
             HotLoopScheduler();
         };
@@ -822,42 +769,40 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                 });
             });
 
-            RunBlockGemmStep_(c_warp_tensors,
-                              a_warp_tensor,
-                              b_warp_tensor_ping,
-                              scale_a_tile_tensor_ping,
-                              scale_b_tile_tensor_ping,
-                              a_warp_window_ping);
+            block_gemm(c_warp_tensors,
+                       b_warp_tensor_ping,
+                       scale_a_tile_tensor_ping,
+                       scale_b_tile_tensor_ping,
+                       a_warp_window_ping);
             s_waitcnt<Bload_num + ScaleAload_num + ScaleBload_num>();
             block_sync_lds();
 
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
-                constexpr auto mIter    = loadIter % MXdlPack;
-                constexpr auto kIter    = loadIter / MXdlPack;
-                a_warp_tensor(loadIter) = load_tile_with_offset(
-                    a_warp_window_pong,
-                    tuple<number<mIter * WG::kM>,
-                          number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{});
+                constexpr auto mIter = loadIter % MXdlPack;
+                constexpr auto kIter = loadIter / MXdlPack;
+                block_gemm.preloaded_a_warp_tensor(loadIter) =
+                    bit_cast<typename BlockGemm::AWarpTensor>(load_tile_with_offset(
+                        a_warp_window_pong,
+                        tuple<number<mIter * WG::kM>,
+                              number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{}));
             });
 
             Last2ndHotLoopScheduler();
 
-            RunBlockGemmStep_(c_warp_tensors,
-                              a_warp_tensor,
-                              b_warp_tensor_pong,
-                              scale_a_tile_tensor_pong,
-                              scale_b_tile_tensor_pong,
-                              a_warp_window_pong);
+            block_gemm(c_warp_tensors,
+                       b_warp_tensor_pong,
+                       scale_a_tile_tensor_pong,
+                       scale_b_tile_tensor_pong,
+                       a_warp_window_pong);
             LastHotLoopScheduler();
         }
         else if constexpr(TailNum == TailNumber::Odd)
         {
-            RunBlockGemmStep_(c_warp_tensors,
-                              a_warp_tensor,
-                              b_warp_tensor_ping,
-                              scale_a_tile_tensor_ping,
-                              scale_b_tile_tensor_ping,
-                              a_warp_window_ping);
+            block_gemm(c_warp_tensors,
+                       b_warp_tensor_ping,
+                       scale_a_tile_tensor_ping,
+                       scale_b_tile_tensor_ping,
+                       a_warp_window_ping);
             LastHotLoopScheduler();
         }
         else

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "ck_tile/ops/gemm_mx/block/block_mx_asmem_breg_creg.hpp"
 #include "ck_tile/ops/gemm_mx/kernel/gemm_mx_kernel.hpp"
 #include "ck_tile/ops/gemm_mx/kernel/scale_pointer.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/gemm_pipeline_ag_bg_cr_comp_async.hpp"

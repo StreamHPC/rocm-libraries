@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include "ck_tile/ops/gemm/block/block_gemm_asmem_bsmem_creg_v1.hpp"
+#include "ck_tile/ops/gemm/block/block_gemm_asmem_bsmem_creg_v1_custom_policy.hpp"
+#include "ck_tile/ops/gemm_mx/block/block_mx_asmem_breg_creg.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_universal_pipeline_ag_bg_cr_policy.hpp"
 
 namespace ck_tile {
@@ -18,7 +19,6 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
 
     static constexpr index_t kDramLoadPackBytes = 128;
     static constexpr index_t DWORDx4            = 16;
-    static constexpr index_t DWORDx3            = 12;
 
     static constexpr int MXdlPack = 2;
     static constexpr int NXdlPack = 2;
@@ -57,9 +57,6 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
     static constexpr index_t AK1 = DWORDx4 * APackedSize;
     static constexpr index_t BK1 = DWORDx4 * BPackedSize;
 
-    // The preshuffle path keeps the MX-specific global/LDS layouts, but the pipeline performs
-    // the live MFMA loop inline. This helper is currently used only for warp metadata and
-    // C-tile construction.
     CK_TILE_HOST_DEVICE static constexpr auto GetWarpGemmMWarpNWarp()
     {
         using WarpTile = typename Problem::BlockGemmShape::WarpTile;
@@ -73,7 +70,6 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
         return make_tuple(WarpGemm{}, MWarps, NWarps);
     }
 
-    // This is retained mainly for C-tile construction in the current port.
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
         using WarpTile        = typename Problem::BlockGemmShape::WarpTile;
@@ -89,12 +85,12 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
                                                                       typename Problem::CDataType,
                                                                       BlockWarps,
                                                                       WarpGemm>;
-        return BlockGemmASmemBSmemCRegV1<Problem, BlockGemmPolicy>{};
+        return BlockMXGemmASmemBRegCReg<Problem, BlockGemmPolicy>{};
     }
 
     CK_TILE_DEVICE static constexpr auto MakeMX_ABytesDramTileDistribution()
     {
-        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? DWORDx3 : DWORDx4;
+        constexpr index_t K2 = DWORDx4;
         constexpr index_t K1 = kDramLoadPackBytes / DWORDx4;
         constexpr index_t K0 = KPerBlock / APackedSize * sizeof(ADataType) / (K1 * K2);
 
@@ -123,7 +119,7 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
         auto&& tensor_view_tmp  = window_tmp.get_bottom_tensor_view();
         const auto [rows, cols] = tensor_view_tmp.get_tensor_descriptor().get_lengths();
 
-        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? DWORDx3 : DWORDx4;
+        constexpr index_t K2 = DWORDx4;
         constexpr index_t K1 = kDramLoadPackBytes / DWORDx4;
         const index_t K0     = cols / (K1 * K2 / sizeof(ADataType) * APackedSize);
         const auto col_lens  = make_tuple(K0, number<K1>{}, number<K2>{});
@@ -163,12 +159,10 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
 
     CK_TILE_DEVICE static constexpr auto MakeMX_ALdsBytesBlockDescriptor()
     {
-        constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? DWORDx3 : AK1 / APackedSize;
+        constexpr index_t K2     = AK1 / APackedSize;
         constexpr index_t K2_Pad = 16;
         constexpr index_t K1     = kDramLoadPackBytes / DWORDx4;
-        constexpr index_t K0     = std::is_same_v<ADataType, pk_fp6x16_t>
-                                       ? KPerBlock / (K1 * K2 / sizeof(ADataType) * APackedSize)
-                                       : KPerBlock / (K1 * AK1);
+        constexpr index_t K0     = KPerBlock / (K1 * AK1);
         static_assert(K0 * K1 * K2 / sizeof(ADataType) * APackedSize == KPerBlock,
                       "K0, K1, K2 must cover whole KPerBlock!");
 
@@ -253,16 +247,6 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
                     tuple<sequence<0, 0>, sequence<1, 2>>,
                     sequence<2, 2>,
                     sequence<0, 2>>{});
-        else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<NWarps>,
-                    tuple<sequence<MWarps, MXdlPack, MPerXdl>,
-                          sequence<K_Lane, KPerXdl / (K_Lane * APackedSize), DWORDx3>>,
-                    tuple<sequence<1, 0>, sequence<2, 1>>,
-                    tuple<sequence<0, 0>, sequence<0, 2>>,
-                    sequence<2, 2>,
-                    sequence<1, 2>>{});
         else
             static_assert(false, "unsupported datatype");
     }
@@ -294,19 +278,6 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
                     tuple<sequence<0, 0, 1>, sequence<2>>,
                     sequence<2, 2>,
                     sequence<0, 3>>{});
-        else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<WaveRepeat>,
-                    tuple<sequence<NWarps, NXdlPack>,
-                          sequence<K0,
-                                   K1,
-                                   K_Thread * sizeof(BDataType) / (DWORDx3 * BPackedSize),
-                                   DWORDx3>>,
-                    tuple<sequence<0, 1, 2>, sequence<2>>,
-                    tuple<sequence<0, 0, 0>, sequence<1>>,
-                    sequence<2, 2>,
-                    sequence<2, 3>>{});
         else
             static_assert(false, "unsupported datatype");
     }
@@ -426,14 +397,7 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeA()
     {
-        if constexpr(!std::is_same_v<ADataType, pk_fp6x16_t>)
-        {
-            return sizeof(ADataType) * MakeMX_ALdsBytesBlockDescriptor().get_element_space_size();
-        }
-        else
-        {
-            return MakeMX_ALdsBytesBlockDescriptor().get_element_space_size();
-        }
+        return sizeof(ADataType) * MakeMX_ALdsBytesBlockDescriptor().get_element_space_size();
     }
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return GetSmemSizeA(); }
