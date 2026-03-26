@@ -9,6 +9,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/host/check_err.hpp"
 #include "ck_tile/host/reference/reference_gemm.hpp"
+#include "ck_tile/host/tensor_shuffle_utils.hpp"
 #include "test_mx_gemm_config.hpp"
 #include "test_mx_gemm_instance.hpp"
 
@@ -33,40 +34,6 @@ auto calculate_rtol_atol_mx(ck_tile::index_t K, float max_accumulated_value)
 template <typename GemmConfig>
 struct TestMXGemmArchTraits
 {
-    template <typename dtype>
-    static auto preShuffleWeight(ck_tile::HostTensor<dtype>& src)
-    {
-        constexpr ck_tile::index_t NLane = GemmConfig::N_Warp_Tile;
-        auto src_lengths                 = src.get_lengths();
-        const int K                      = src_lengths[0];
-        const int N                      = src_lengths[1];
-        constexpr int packed_size        = ck_tile::numeric_traits<dtype>::PackedSize;
-        const int KPack = std::is_same_v<dtype, ck_tile::pk_fp6x16_t> ? 32 : 16 * packed_size;
-        const int KLane = ck_tile::get_warp_size() / NLane;
-        const int K0    = K / (KLane * KPack);
-        ck_tile::HostTensor<dtype> shuffled(ck_tile::HostTensorDescriptor(
-            {static_cast<std::size_t>(N * K)}, {static_cast<std::size_t>(1)}));
-
-        for(int n = 0; n < N; ++n)
-        {
-            for(int k = 0; k < K; k += packed_size)
-            {
-                const int n0          = n / NLane;
-                const int n1          = n % NLane;
-                const int k0          = k / (KLane * KPack);
-                const int tempk       = k % (KLane * KPack);
-                const int k1          = tempk / KPack;
-                const int k2          = tempk % KPack;
-                const int outputIndex = n0 * KPack * NLane * KLane * K0 +
-                                        k0 * KPack * NLane * KLane + k1 * KPack * NLane +
-                                        n1 * KPack + k2;
-                shuffled(outputIndex) = src(k, n);
-            }
-        }
-
-        return shuffled;
-    }
-
     template <bool KLast, typename dtype>
     static auto preShuffleScale(ck_tile::HostTensor<dtype>& src)
     {
@@ -229,6 +196,7 @@ class TestMxGemmUtil : public ::testing::Test
         constexpr ck_tile::index_t XdlMNThread = GemmConfig::M_Warp_Tile;
         constexpr ck_tile::index_t XdlKThread  = 64 / XdlMNThread;
 
+        // Pack scales into int32_t for GPU consumption
         auto scale_a_packed =
             packScalesMNxK<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_a_host, true);
         auto scale_b_packed =
@@ -236,7 +204,7 @@ class TestMxGemmUtil : public ::testing::Test
 
         const auto b_host_for_device = [&]() {
             if constexpr(GemmConfig::Preshuffle)
-                return TestMXGemmArchTraits<GemmConfig>::preShuffleWeight(b_host);
+                return ck_tile::shuffle_b<GemmConfig>(b_host);
             else
                 return b_host;
         }();
