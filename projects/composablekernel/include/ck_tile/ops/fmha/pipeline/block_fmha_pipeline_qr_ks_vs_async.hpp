@@ -563,7 +563,6 @@ struct BlockFmhaPipelineQRKSVSAsync
                                         k_pre_np);
                     if constexpr(i_k0 < k0_loops - 1)
                         move_tile_window(k_dram_window, {0, kK0});
-                    k_scale_block_tile = load_k_scale_block_tile();
                     async_load_fence(k_dram_window.get_num_of_access());
                     __builtin_amdgcn_s_barrier();
                     __builtin_amdgcn_sched_barrier(0);
@@ -577,6 +576,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                 __builtin_amdgcn_sched_barrier(0);
 
             async_load_fence();
+            k_scale_block_tile = load_k_scale_block_tile();
             __builtin_amdgcn_s_barrier();
 
             const auto bias_tile = load_tile(bias_dram_window); // load bias tile
