@@ -568,6 +568,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                     __builtin_amdgcn_s_barrier();
                     __builtin_amdgcn_sched_barrier(0);
                     run_gemm_0(number<i_k0>{});
+                    k_scale_block_tile = load_k_scale_block_tile();
                 });
             }
 
@@ -978,10 +979,10 @@ struct BlockFmhaPipelineQRKSVSAsync
             auto run_gemm_1 = [&](auto i_k1) {
                 auto p_slice =
                     get_slice_tile(p, sequence<0, i_k1 * kK1>{}, sequence<kM0, (i_k1 + 1) * kK1>{});
-                auto v_slice  =  get_slice_tile(
-                        v_lds_window,
-                        sequence<(LdsSeq.at(number<k0_loops + i_k1>{})) * kN1, 0>{},
-                        sequence<(LdsSeq.at(number<k0_loops + i_k1>{}) + 1) * kN1, kK1>{});
+                auto v_slice = get_slice_tile(
+                    v_lds_window,
+                    sequence<(LdsSeq.at(number<k0_loops + i_k1>{})) * kN1, 0>{},
+                    sequence<(LdsSeq.at(number<k0_loops + i_k1>{}) + 1) * kN1, kK1>{});
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
                 {
                     auto p_scale_slice =
