@@ -8,6 +8,9 @@
 
 namespace ck_tile {
 
+// A is block distributed tensor
+// B is block distributed tensor
+// C is block distributed tensor
 template <typename Problem_,
           typename Policy_ = BlockGemmARegBRegCRegV1DefaultPolicy,
           bool TransposeC_ = false>
@@ -162,7 +165,11 @@ struct BlockGemmARegBRegCRegV1
         }
     }
 
-    // C += A * B
+    // C += A * B with MX scaling and packed-in-two (XdlPack) optimization
+    // Scale tensors contain pre-packed int32_t: each int32_t holds MXdlPack * KXdlPack e8m0_t
+    // values (for A) or NXdlPack * KXdlPack (for B), packed on the host.
+    // Uses OpSel (0-3) to select which byte within the packed int32_t for each MFMA call.
+    // XdlPack template parameters default to 2; fall back to 1 when iteration count is too small.
     template <typename CBlockTensor, typename ABlockTensor, typename BBlockTensor>
     CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
                                    const ABlockTensor& a_block_tensor,
@@ -301,7 +308,7 @@ struct BlockGemmARegBRegCRegV1
         constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
-        // Effective XdlPack
+        // Effective XdlPack: fall back to 1 when iteration count is insufficient
         constexpr index_t MXdlPack =
             (MIterPerWarp >= MXdlPack_ && MIterPerWarp % MXdlPack_ == 0) ? MXdlPack_ : 1;
         constexpr index_t NXdlPack =
