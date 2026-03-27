@@ -49,7 +49,7 @@ struct BlockMXGemmASmemBRegCReg
     using AWarpTensor = typename WarpGemm::AWarpTensor;
     statically_indexed_array<AWarpTensor, m_preload> preloaded_a_warp_tensor;
 
-    CK_TILE_HOST_DEVICE static constexpr auto MakeALdsTileDistribution()
+    CK_TILE_HOST_DEVICE static constexpr auto MakeABlockTileDistribution()
     {
         constexpr index_t K_Lane   = get_warp_size() / 16;
         constexpr index_t K_Thread = WarpGemm::kK / K_Lane;
@@ -86,16 +86,33 @@ struct BlockMXGemmASmemBRegCReg
     }
 
     template <typename AWarpWindow>
-    CK_TILE_DEVICE void LocalPrefetch(const AWarpWindow& a_warp_window)
+    CK_TILE_DEVICE auto MakeALoadWindows(const AWarpWindow& a_warp_window) const
+    {
+        return generate_tuple(
+            [&](auto kIter) {
+                return generate_tuple(
+                    [&](auto mIter) {
+                        return make_tile_window(
+                            a_warp_window.get_bottom_tensor_view(),
+                            a_warp_window.get_window_lengths(),
+                            {mIter * WarpGemm::kM,
+                             kIter * WarpGemm::kK * sizeof(ADataType) / APackedSize},
+                            a_warp_window.get_tile_distribution());
+                    },
+                    number<MXdlPack>{});
+            },
+            number<m_preload / MXdlPack>{});
+    }
+
+    template <typename ALoadWindows>
+    CK_TILE_DEVICE void LocalPrefetch(const ALoadWindows& a_load_windows)
     {
         static_for<0, m_preload, 1>{}([&](auto loadIter) {
             constexpr auto mIter = loadIter % MXdlPack;
             constexpr auto kIter = loadIter / MXdlPack;
 
-            preloaded_a_warp_tensor(loadIter) = bit_cast<AWarpTensor>(load_tile_with_offset(
-                a_warp_window,
-                tuple<number<mIter * WarpGemm::kM>,
-                      number<kIter * WarpGemm::kK * sizeof(ADataType) / APackedSize>>{}));
+            load_tile(preloaded_a_warp_tensor(loadIter),
+                      a_load_windows[number<kIter>{}][number<mIter>{}]);
         });
     }
 
