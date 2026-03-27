@@ -82,10 +82,10 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
     using GemmEpilogueProblem =
         ck_tile::CShuffleEpilogueProblem<ComputeDataType,
                                          ComputeDataType,
-                                         ck_tile::tuple<>,
+                                         ck_tile::tuple<>, // DsDataType
                                          AccDataType,
                                          CDataType,
-                                         ck_tile::tuple<>,
+                                         ck_tile::tuple<>, // DsLayout
                                          CLayout,
                                          ck_tile::element_wise::PassThrough,
                                          TilePartitioner::MPerBlock,
