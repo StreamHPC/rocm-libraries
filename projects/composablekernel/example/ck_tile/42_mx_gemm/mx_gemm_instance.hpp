@@ -7,7 +7,7 @@
 #include "mx_gemm.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/gemm_pipeline_ag_bg_cr_comp_async.hpp"
 #include "ck_tile/ops/gemm_mx/kernel/gemm_mx_kernel.hpp"
-#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_preshuffle_pipeline_agmem_bgmem_creg_v1.hpp"
+#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_wp_pipeline_agmem_bgmem_creg_v1.hpp"
 
 template <typename Layout>
 using is_row_major_t = ck_tile::bool_constant<

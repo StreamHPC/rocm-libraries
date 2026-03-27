@@ -8,7 +8,7 @@
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_base.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_agmem_bgmem_creg_v1.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
-#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_preshuffle_pipeline_agmem_bgmem_creg_v1_policy.hpp"
+#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_wp_pipeline_agmem_bgmem_creg_v1_policy.hpp"
 
 namespace ck_tile {
 

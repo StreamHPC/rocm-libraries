@@ -6,7 +6,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/gemm_pipeline_ag_bg_cr_comp_async.hpp"
 #include "ck_tile/ops/gemm_mx/kernel/gemm_mx_kernel.hpp"
-#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_preshuffle_pipeline_agmem_bgmem_creg_v1.hpp"
+#include "ck_tile/ops/gemm_mx/pipeline/mx_gemm_wp_pipeline_agmem_bgmem_creg_v1.hpp"
 #include "test_mx_gemm_config.hpp"
 
 template <typename GemmConfig,
