@@ -57,19 +57,6 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
     static constexpr index_t AK1 = DWORDx4 * APackedSize;
     static constexpr index_t BK1 = DWORDx4 * BPackedSize;
 
-    CK_TILE_HOST_DEVICE static constexpr auto GetWarpGemmMWarpNWarp()
-    {
-        using WarpTile = typename Problem::BlockGemmShape::WarpTile;
-        using WarpGemm = WarpGemmDispatcher<ADataType,
-                                            BDataType,
-                                            typename Problem::CDataType,
-                                            WarpTile::at(I0),
-                                            WarpTile::at(I1),
-                                            WarpTile::at(I2),
-                                            Problem::TransposeC>;
-        return make_tuple(WarpGemm{}, MWarps, NWarps);
-    }
-
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {
         using WarpTile        = typename Problem::BlockGemmShape::WarpTile;
@@ -222,33 +209,6 @@ struct MXGemmPipelineAgBgCrPolicy : UniversalGemmPipelineAgBgCrPolicy
             make_tuple(sequence<0>{}, sequence<1>{}));
 
         return a_lds_block_desc;
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr auto MakeMX_ALDSBytes_TileDistribution()
-    {
-        static_assert(BlockWarps::at(I0) == 1, "requires Wave_M == 1");
-
-        if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<NWarps>,
-                    tuple<sequence<MWarps, MXdlPack, MPerXdl>, sequence<K_Lane, AK1 / APackedSize>>,
-                    tuple<sequence<1, 0>, sequence<2, 1>>,
-                    tuple<sequence<0, 0>, sequence<0, 2>>,
-                    sequence<2>,
-                    sequence<1>>{});
-        else if constexpr(std::is_same_v<ADataType, fp8_t>)
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<NWarps>,
-                    tuple<sequence<MWarps, MXdlPack, MPerXdl>,
-                          sequence<K_Thread / AK1, K_Lane, AK1 / APackedSize>>,
-                    tuple<sequence<1, 0>, sequence<2, 1>>,
-                    tuple<sequence<0, 0>, sequence<1, 2>>,
-                    sequence<2, 2>,
-                    sequence<0, 2>>{});
-        else
-            static_assert(false, "unsupported datatype");
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeMX_BFlatBytesDramTileDistribution()
@@ -413,12 +373,10 @@ struct MXGemmPipelineAgBgCrPolicy
         return detail::MXGemmPipelineAgBgCrPolicy<Problem>::method(std::forward<Args>(args)...); \
     }
 
-    FORWARD_METHOD_(GetWarpGemmMWarpNWarp);
     FORWARD_METHOD_(GetBlockGemm);
     FORWARD_METHOD_(MakeMX_AAsyncLoadBytesDramWindow);
     FORWARD_METHOD_(MakeMX_ABytesDramTileDistribution);
     FORWARD_METHOD_(MakeMX_ALdsBytesBlockDescriptor);
-    FORWARD_METHOD_(MakeMX_ALDSBytes_TileDistribution);
     FORWARD_METHOD_(MakeMX_BFlatBytesDramTileDistribution);
     FORWARD_METHOD_(MakeMX_BFlatBytesDramWindow);
     FORWARD_METHOD_(MakeMX_ScaleA_DramTileDistribution);

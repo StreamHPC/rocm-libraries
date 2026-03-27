@@ -43,19 +43,23 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                                           GemmConfig::Preshuffle>;
 
     using MXPipelineProblem =
-        std::conditional_t<GemmConfig::Preshuffle,
-                           ck_tile::MXGemmPreshufflePipelineProblem<ADataType,
-                                                                    BDataType,
-                                                                    AccDataType,
-                                                                    GemmShape,
-                                                                    MXGemmTraits,
-                                                                    GemmConfig::Scheduler>,
-                           ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                                 BDataType,
-                                                                 AccDataType,
-                                                                 GemmShape,
-                                                                 MXGemmTraits,
-                                                                 GemmConfig::Scheduler>>;
+        ck_tile::MXGemmPipelineProblem<ADataType,
+                                       BDataType,
+                                       AccDataType,
+                                       GemmShape,
+                                       MXGemmTraits,
+                                       GemmConfig::Scheduler,
+                                       ck_tile::element_wise::PassThrough,
+                                       ck_tile::element_wise::PassThrough,
+                                       true,
+                                       ck_tile::TailNumber::Full,
+                                       ck_tile::amd_buffer_coherence_enum::coherence_default,
+                                       false,
+                                       ADataType,
+                                       false,
+                                       1,
+                                       1,
+                                       GemmConfig::TiledMMAPermuteN>;
 
     using MXGemmPipeline =
         std::conditional_t<GemmConfig::Preshuffle,
@@ -69,7 +73,6 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
 
     using ComputeDataType = ADataType;
 
-    static constexpr ck_tile::index_t BlockedXDLN_PerWarp = GemmConfig::Preshuffle ? 2 : 1;
     using GemmEpilogueProblem =
         ck_tile::CShuffleEpilogueProblem<ComputeDataType,
                                          ComputeDataType,
@@ -87,12 +90,11 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                          GemmConfig::N_Warp_Tile,
                                          GemmConfig::K_Warp_Tile,
                                          MXPipelineProblem::TransposeC,
-                                         GemmConfig::Preshuffle ? GemmConfig::NumWaveGroups : 1,
+                                         MXPipelineProblem::EpilogueNumWaveGroups,
                                          false,
                                          1,
-                                         GemmConfig::Preshuffle ? GemmConfig::TiledMMAPermuteN
-                                                                : false,
-                                         BlockedXDLN_PerWarp>;
+                                         MXPipelineProblem::TiledMMAPermuteN,
+                                         MXPipelineProblem::BlockedXDLNPerWarp>;
 
     using GemmEpilogue = ck_tile::CShuffleEpilogue<GemmEpilogueProblem>;
 

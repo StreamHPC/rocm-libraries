@@ -25,7 +25,18 @@ TYPED_TEST_SUITE(TestMxGemmFp4, MxFp4Types);
 
 TYPED_TEST(TestMxGemmFp4, BasicSizes)
 {
-    this->Run(128, 512, 256);
-    this->Run(256, 512, 256);
-    this->Run(256, 1024, 512);
+    using GemmConfig = std::tuple_element_t<2, TypeParam>;
+
+    if constexpr(GemmConfig::Preshuffle)
+    {
+        this->Run(128, 512, 256);
+        this->Run(256, 512, 256);
+        this->Run(256, 1024, 512);
+    }
+    else
+    {
+        this->Run(64, 64, 256);
+        this->Run(128, 128, 256);
+        this->Run(64, 128, 512);
+    }
 }

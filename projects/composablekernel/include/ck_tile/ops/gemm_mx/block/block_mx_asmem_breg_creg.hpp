@@ -10,11 +10,14 @@ namespace ck_tile {
 template <typename Problem_, typename BlockPolicy_>
 struct BlockMXGemmASmemBRegCReg
 {
-    using Problem        = remove_cvref_t<Problem_>;
-    using BlockPolicy    = remove_cvref_t<BlockPolicy_>;
-    using ADataType      = remove_cvref_t<typename Problem::ADataType>;
-    using CDataType      = remove_cvref_t<typename Problem::CDataType>;
-    using BlockGemmShape = remove_cvref_t<typename Problem::BlockGemmShape>;
+    using Problem            = remove_cvref_t<Problem_>;
+    using BlockPolicy        = remove_cvref_t<BlockPolicy_>;
+    using ADataType          = remove_cvref_t<typename Problem::ADataType>;
+    using CDataType          = remove_cvref_t<typename Problem::CDataType>;
+    using BlockGemmShape     = remove_cvref_t<typename Problem::BlockGemmShape>;
+    static constexpr auto I0 = number<0>{};
+    static constexpr auto I1 = number<1>{};
+    static constexpr auto I2 = number<2>{};
 
     static constexpr index_t MPerBlock = BlockGemmShape::kM;
     static constexpr index_t NPerBlock = BlockGemmShape::kN;
@@ -45,6 +48,56 @@ struct BlockMXGemmASmemBRegCReg
 
     using AWarpTensor = typename WarpGemm::AWarpTensor;
     statically_indexed_array<AWarpTensor, m_preload> preloaded_a_warp_tensor;
+
+    CK_TILE_HOST_DEVICE static constexpr auto MakeALdsTileDistribution()
+    {
+        constexpr index_t K_Lane   = get_warp_size() / 16;
+        constexpr index_t K_Thread = WarpGemm::kK / K_Lane;
+        constexpr index_t AK1      = 16 * APackedSize;
+
+        static_assert(BlockGemmShape::WarpTile::at(I0) == 16 &&
+                      BlockGemmShape::WarpTile::at(I1) == 16);
+        static_assert(BlockGemmShape::BlockWarps::at(I0) == 1, "requires Wave_M == 1");
+
+        if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
+            return make_static_tile_distribution(
+                tile_distribution_encoding<
+                    sequence<NWarp>,
+                    tuple<sequence<MWarp, MXdlPack, WarpGemm::kM>,
+                          sequence<K_Lane, AK1 / numeric_traits<ADataType>::PackedSize>>,
+                    tuple<sequence<1, 0>, sequence<2, 1>>,
+                    tuple<sequence<0, 0>, sequence<0, 2>>,
+                    sequence<2>,
+                    sequence<1>>{});
+        else if constexpr(std::is_same_v<ADataType, fp8_t>)
+            return make_static_tile_distribution(
+                tile_distribution_encoding<
+                    sequence<NWarp>,
+                    tuple<sequence<MWarp, MXdlPack, WarpGemm::kM>,
+                          sequence<K_Thread / AK1,
+                                   K_Lane,
+                                   AK1 / numeric_traits<ADataType>::PackedSize>>,
+                    tuple<sequence<1, 0>, sequence<2, 1>>,
+                    tuple<sequence<0, 0>, sequence<1, 2>>,
+                    sequence<2, 2>,
+                    sequence<0, 2>>{});
+        else
+            static_assert(false, "unsupported datatype");
+    }
+
+    template <typename AWarpWindow>
+    CK_TILE_DEVICE void LocalPrefetch(const AWarpWindow& a_warp_window)
+    {
+        static_for<0, m_preload, 1>{}([&](auto loadIter) {
+            constexpr auto mIter = loadIter % MXdlPack;
+            constexpr auto kIter = loadIter / MXdlPack;
+
+            preloaded_a_warp_tensor(loadIter) = bit_cast<AWarpTensor>(load_tile_with_offset(
+                a_warp_window,
+                tuple<number<mIter * WarpGemm::kM>,
+                      number<kIter * WarpGemm::kK * sizeof(ADataType) / APackedSize>>{}));
+        });
+    }
 
     CK_TILE_DEVICE static constexpr auto MakeCBlockTile()
     {

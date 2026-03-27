@@ -27,21 +27,35 @@ template <typename ADataType_,
           typename ComputeDataType_             = ADataType_,
           bool FixedVectorSize_                 = false,
           index_t VectorSizeA_                  = 1,
-          index_t VectorSizeB_                  = 1>
-struct MXGemmPreshufflePipelineProblem : UniversalGemmPipelineProblem<ADataType_,
-                                                                      BDataType_,
-                                                                      CDataType_,
-                                                                      BlockGemmShape_,
-                                                                      Traits_,
-                                                                      Scheduler_,
-                                                                      AElementWise_,
-                                                                      BElementWise_,
-                                                                      ComputeDataType_,
-                                                                      FixedVectorSize_,
-                                                                      VectorSizeA_,
-                                                                      VectorSizeB_>
+          index_t VectorSizeB_                  = 1,
+          bool TiledMMAPermuteN_                = false>
+struct MXGemmPipelineProblem : UniversalGemmPipelineProblem<ADataType_,
+                                                            BDataType_,
+                                                            CDataType_,
+                                                            BlockGemmShape_,
+                                                            Traits_,
+                                                            Scheduler_,
+                                                            AElementWise_,
+                                                            BElementWise_,
+                                                            ComputeDataType_,
+                                                            FixedVectorSize_,
+                                                            VectorSizeA_,
+                                                            VectorSizeB_>
 {
-    using BlockGemmShape = BlockGemmShape_;
+    using Base = UniversalGemmPipelineProblem<ADataType_,
+                                              BDataType_,
+                                              CDataType_,
+                                              BlockGemmShape_,
+                                              Traits_,
+                                              Scheduler_,
+                                              AElementWise_,
+                                              BElementWise_,
+                                              ComputeDataType_,
+                                              FixedVectorSize_,
+                                              VectorSizeA_,
+                                              VectorSizeB_>;
+
+    static constexpr bool Preshuffle = Base::Traits::Preshuffle;
 
     static constexpr int ScaleGranularityK = 32;
 
@@ -55,7 +69,44 @@ struct MXGemmPreshufflePipelineProblem : UniversalGemmPipelineProblem<ADataType_
     static constexpr TailNumber TailNum                   = TailNum_;
     static constexpr amd_buffer_coherence_enum BMemNTType = BMemNTType_;
     static constexpr bool BPreShufflePermute              = BPreShufflePermute_;
+    static constexpr bool TiledMMAPermuteN                = Preshuffle ? TiledMMAPermuteN_ : false;
+    static constexpr index_t EpilogueNumWaveGroups        = Preshuffle ? Base::NumWaveGroups : 1;
+    static constexpr index_t BlockedXDLNPerWarp           = Preshuffle ? 2 : 1;
 };
+
+template <typename ADataType_,
+          typename BDataType_,
+          typename CDataType_,
+          typename BlockGemmShape_,
+          typename Traits_,
+          GemmPipelineScheduler Scheduler_      = GemmPipelineScheduler::Intrawave,
+          typename AElementWise_                = ck_tile::element_wise::PassThrough,
+          typename BElementWise_                = ck_tile::element_wise::PassThrough,
+          bool HasHotLoop_                      = true,
+          TailNumber TailNum_                   = TailNumber::Full,
+          amd_buffer_coherence_enum BMemNTType_ = amd_buffer_coherence_enum::coherence_default,
+          bool BPreShufflePermute_              = false,
+          typename ComputeDataType_             = ADataType_,
+          bool FixedVectorSize_                 = false,
+          index_t VectorSizeA_                  = 1,
+          index_t VectorSizeB_                  = 1>
+using MXGemmPreshufflePipelineProblem = MXGemmPipelineProblem<ADataType_,
+                                                              BDataType_,
+                                                              CDataType_,
+                                                              BlockGemmShape_,
+                                                              Traits_,
+                                                              Scheduler_,
+                                                              AElementWise_,
+                                                              BElementWise_,
+                                                              HasHotLoop_,
+                                                              TailNum_,
+                                                              BMemNTType_,
+                                                              BPreShufflePermute_,
+                                                              ComputeDataType_,
+                                                              FixedVectorSize_,
+                                                              VectorSizeA_,
+                                                              VectorSizeB_,
+                                                              true>;
 
 // This pipeline extends the existing universal GEMM machinery with preshuffled-B support.
 template <typename Problem, typename PipelinePolicy = MXGemmPipelineAgBgCrPolicy>
@@ -86,9 +137,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
 
     using BlockGemm = remove_cvref_t<decltype(PipelinePolicy::template GetBlockGemm<Problem>())>;
 
-    static constexpr auto config = PipelinePolicy::template GetWarpGemmMWarpNWarp<Problem>();
-
-    using WG = remove_cvref_t<decltype(config.template at<0>())>;
+    using WarpGemm = remove_cvref_t<typename BlockGemm::WarpGemm>;
 
     static constexpr index_t DsWritePreIssue = 3;
     static constexpr index_t BlockSize       = Problem::kBlockSize;
@@ -125,12 +174,12 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     using BlockWarps           = remove_cvref_t<typename BlockGemmShape::BlockWarps>;
     using WarpTile             = remove_cvref_t<typename BlockGemmShape::WarpTile>;
 
-    static constexpr index_t MWarp = config.template at<1>();
-    static constexpr index_t NWarp = config.template at<2>();
+    static constexpr index_t MWarp = BlockGemm::MWarp;
+    static constexpr index_t NWarp = BlockGemm::NWarp;
 
-    static constexpr index_t MIterPerWarp = kMPerBlock / (MWarp * WG::kM);
-    static constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WG::kN);
-    static constexpr index_t KIterPerWarp = kKPerBlock / WG::kK;
+    static constexpr index_t MIterPerWarp = kMPerBlock / (MWarp * WarpGemm::kM);
+    static constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);
+    static constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
 
     static constexpr index_t KFlatBytesPerBlockPerIter =
         flatKPerWarp * sizeof(BDataType) / BPackedSize;
@@ -151,8 +200,8 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
 
     static constexpr index_t mfma_per_wg = 1;
 
-    static constexpr index_t dsread_per_wg = WG::kM * WG::kK / AK1 / WaveSize;
-    static_assert((WG::kM * WG::kK) % (AK1 * WaveSize) == 0);
+    static constexpr index_t dsread_per_wg = WarpGemm::kM * WarpGemm::kK / AK1 / WaveSize;
+    static_assert((WarpGemm::kM * WarpGemm::kK) % (AK1 * WaveSize) == 0);
 
     static constexpr index_t dsread_num_perK  = dsread_per_wg * MIterPerWarp;
     static constexpr index_t dswrite_num_perK = dsread_num_perK / NWarp;
@@ -160,7 +209,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     static constexpr index_t Aload_num_perK = dswrite_num_perK;
     static constexpr index_t Aload_rep      = dswrite_rep;
 
-    static constexpr index_t Bload_num_perK = kNPerBlock * WG::kK / NWarp / BK1 / WaveSize;
+    static constexpr index_t Bload_num_perK = kNPerBlock * WarpGemm::kK / NWarp / BK1 / WaveSize;
     static constexpr index_t Bload_num      = Bload_num_perK * KIterPerWarp;
     static constexpr index_t ScaleBload_num =
         kNPerBlock * kKPerBlock / NWarp / ScaleGranularityK / NXdlPack / KXdlPack / WaveSize;
@@ -413,7 +462,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
         auto c_warp_tensors = PipelineImpl<Scheduler>{}.template operator()<HasHotLoop, TailNum>(
             std::forward<Args>(args)...);
 
-        using CWarpDstr = typename WG::CWarpDstr;
+        using CWarpDstr = typename WarpGemm::CWarpDstr;
         constexpr auto c_warp_y_lengths =
             to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
@@ -485,7 +534,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
 
         static_assert(MWarp == 1);
 
-        using CWarpTensor = typename WG::CWarpTensor;
+        using CWarpTensor = typename WarpGemm::CWarpTensor;
 
         auto a_dram_window = PipelinePolicy::template MakeMX_AAsyncLoadBytesDramWindow<Problem>(
             a_copy_dram_window_tmp);
@@ -514,16 +563,18 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                                         number<kKPerBlock / APackedSize * sizeof(ADataType)>{}),
                              {0, 0});
 
-        auto a_warp_window_ping = make_tile_window(
-            a_lds_block_ping,
-            make_tuple(number<WG::kM>{}, number<WG::kK / APackedSize * sizeof(ADataType)>{}),
-            {0, 0},
-            PipelinePolicy::template MakeMX_ALDSBytes_TileDistribution<Problem>());
-        auto a_warp_window_pong = make_tile_window(
-            a_lds_block_pong,
-            make_tuple(number<WG::kM>{}, number<WG::kK / APackedSize * sizeof(ADataType)>{}),
-            {0, 0},
-            PipelinePolicy::template MakeMX_ALDSBytes_TileDistribution<Problem>());
+        auto a_warp_window_ping =
+            make_tile_window(a_lds_block_ping,
+                             make_tuple(number<WarpGemm::kM>{},
+                                        number<WarpGemm::kK / APackedSize * sizeof(ADataType)>{}),
+                             {0, 0},
+                             BlockGemm::MakeALdsTileDistribution());
+        auto a_warp_window_pong =
+            make_tile_window(a_lds_block_pong,
+                             make_tuple(number<WarpGemm::kM>{},
+                                        number<WarpGemm::kK / APackedSize * sizeof(ADataType)>{}),
+                             {0, 0},
+                             BlockGemm::MakeALdsTileDistribution());
 
         auto b_flat_dram_window = PipelinePolicy::template MakeMX_BFlatBytesDramWindow<Problem>(
             b_flat_dram_block_window_tmp);
@@ -545,23 +596,23 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
 
         auto scale_a_dram_window = make_tile_window(
             scale_a_window.get_bottom_tensor_view(),
-            make_tuple(number<MWarp * WG::kM>{}, number<64 / WG::kM>{}),
+            make_tuple(number<MWarp * WarpGemm::kM>{}, number<64 / WarpGemm::kM>{}),
             scale_a_window.get_window_origin(),
             PipelinePolicy::template MakeMX_ScaleA_FlatDramTileDistribution<Problem>());
         const auto scale_a_dram_step_m = amd_wave_read_first_lane(
-            scale_a_dram_window.get_load_offset(tuple<number<MWarp * WG::kM>, number<0>>{}));
+            scale_a_dram_window.get_load_offset(tuple<number<MWarp * WarpGemm::kM>, number<0>>{}));
         const auto scale_a_dram_step_k = amd_wave_read_first_lane(
-            scale_a_dram_window.get_load_offset(tuple<number<0>, number<64 / WG::kM>>{}));
+            scale_a_dram_window.get_load_offset(tuple<number<0>, number<64 / WarpGemm::kM>>{}));
 
         auto scale_b_dram_window = make_tile_window(
             scale_b_window.get_bottom_tensor_view(),
-            make_tuple(number<NWarp * WG::kN>{}, number<64 / WG::kN>{}),
+            make_tuple(number<NWarp * WarpGemm::kN>{}, number<64 / WarpGemm::kN>{}),
             scale_b_window.get_window_origin(),
             PipelinePolicy::template MakeMX_ScaleB_DramTileDistribution<Problem>());
         const auto scale_b_dram_step_n = amd_wave_read_first_lane(
-            scale_b_dram_window.get_load_offset(tuple<number<NWarp * WG::kN>, number<0>>{}));
+            scale_b_dram_window.get_load_offset(tuple<number<NWarp * WarpGemm::kN>, number<0>>{}));
         const auto scale_b_dram_step_k = amd_wave_read_first_lane(
-            scale_b_dram_window.get_load_offset(tuple<number<0>, number<64 / WG::kN>>{}));
+            scale_b_dram_window.get_load_offset(tuple<number<0>, number<64 / WarpGemm::kN>>{}));
 
         statically_indexed_array<
             statically_indexed_array<decltype(load_tile(scale_a_dram_window)), KPackIterPerWarp>,
@@ -619,16 +670,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
         BlockGemm block_gemm;
 
         s_waitcnt_barrier<Bload_num + ScaleAload_num + ScaleBload_num>();
-        static_for<0, m_preload, 1>{}([&](auto loadIter) {
-            constexpr auto mIter = loadIter % MXdlPack;
-            constexpr auto kIter = loadIter / MXdlPack;
-
-            block_gemm.preloaded_a_warp_tensor(loadIter) =
-                bit_cast<typename BlockGemm::AWarpTensor>(load_tile_with_offset(
-                    a_warp_window_ping,
-                    tuple<number<mIter * WG::kM>,
-                          number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{}));
-        });
+        block_gemm.LocalPrefetch(a_warp_window_ping);
         __builtin_amdgcn_sched_barrier(0);
 
         auto main_body_implx2 = [&]() mutable {
@@ -673,15 +715,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
             move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
             move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
 
-            static_for<0, m_preload, 1>{}([&](auto loadIter) {
-                constexpr auto mIter = loadIter % MXdlPack;
-                constexpr auto kIter = loadIter / MXdlPack;
-                block_gemm.preloaded_a_warp_tensor(loadIter) =
-                    bit_cast<typename BlockGemm::AWarpTensor>(load_tile_with_offset(
-                        a_warp_window_pong,
-                        tuple<number<mIter * WG::kM>,
-                              number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{}));
-            });
+            block_gemm.LocalPrefetch(a_warp_window_pong);
             HotLoopScheduler();
 
             static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
@@ -723,15 +757,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
             move_tile_window(scale_a_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
             move_tile_window(scale_b_dram_window, {0, kKPerBlock / (32 * KXdlPack)});
 
-            static_for<0, m_preload, 1>{}([&](auto loadIter) {
-                constexpr auto mIter = loadIter % MXdlPack;
-                constexpr auto kIter = loadIter / MXdlPack;
-                block_gemm.preloaded_a_warp_tensor(loadIter) =
-                    bit_cast<typename BlockGemm::AWarpTensor>(load_tile_with_offset(
-                        a_warp_window_ping,
-                        tuple<number<mIter * WG::kM>,
-                              number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{}));
-            });
+            block_gemm.LocalPrefetch(a_warp_window_ping);
             HotLoopScheduler();
         };
 
@@ -777,15 +803,7 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
             s_waitcnt<Bload_num + ScaleAload_num + ScaleBload_num>();
             block_sync_lds();
 
-            static_for<0, m_preload, 1>{}([&](auto loadIter) {
-                constexpr auto mIter = loadIter % MXdlPack;
-                constexpr auto kIter = loadIter / MXdlPack;
-                block_gemm.preloaded_a_warp_tensor(loadIter) =
-                    bit_cast<typename BlockGemm::AWarpTensor>(load_tile_with_offset(
-                        a_warp_window_pong,
-                        tuple<number<mIter * WG::kM>,
-                              number<kIter * WG::kK * sizeof(ADataType) / APackedSize>>{}));
-            });
+            block_gemm.LocalPrefetch(a_warp_window_pong);
 
             Last2ndHotLoopScheduler();
 
