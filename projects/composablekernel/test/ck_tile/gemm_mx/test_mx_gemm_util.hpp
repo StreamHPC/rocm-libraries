@@ -108,14 +108,14 @@ class TestMxGemmUtil : public ::testing::Test
               ck_tile::index_t XdlKThread  = 4>
     static auto packScalesMNxK(const ck_tile::HostTensor<ck_tile::e8m0_t>& src, bool kLast)
     {
-        auto src_lengths                    = src.get_lengths();
-        const ck_tile::index_t MN           = kLast ? src_lengths[0] : src_lengths[1];
-        const ck_tile::index_t K_scale      = kLast ? src_lengths[1] : src_lengths[0];
-        const ck_tile::index_t MN_packed    = MN / MNPack;
-        const ck_tile::index_t K_packed     = K_scale / KPack;
-        const ck_tile::index_t total_packed = MN_packed * K_packed;
-
-        std::vector<int32_t> packed(total_packed);
+        auto src_lengths                 = src.get_lengths();
+        const ck_tile::index_t MN        = kLast ? src_lengths[0] : src_lengths[1];
+        const ck_tile::index_t K_scale   = kLast ? src_lengths[1] : src_lengths[0];
+        const ck_tile::index_t MN_packed = MN / MNPack;
+        const ck_tile::index_t K_packed  = K_scale / KPack;
+        ck_tile::HostTensor<int32_t> packed(ck_tile::HostTensorDescriptor(
+            {static_cast<std::size_t>(MN_packed), static_cast<std::size_t>(K_packed)},
+            {static_cast<std::size_t>(K_packed), static_cast<std::size_t>(1)}));
 
         for(ck_tile::index_t packed_mn = 0; packed_mn < MN_packed; packed_mn++)
         {
@@ -140,7 +140,7 @@ class TestMxGemmUtil : public ::testing::Test
                         val |= (static_cast<int32_t>(v.get()) << (byteIdx * 8));
                     }
                 }
-                packed[packed_mn * K_packed + packed_k] = val;
+                packed(packed_mn, packed_k) = val;
             }
         }
         return packed;
@@ -214,7 +214,7 @@ class TestMxGemmUtil : public ::testing::Test
                 return TestMXGemmArchTraits<GemmConfig>::template preShuffleScale<true>(
                     scale_a_host);
             else
-                return scale_a_host;
+                return scale_a_packed;
         }();
 
         const auto scale_b_host_for_device = [&]() {
@@ -222,38 +222,22 @@ class TestMxGemmUtil : public ::testing::Test
                 return TestMXGemmArchTraits<GemmConfig>::template preShuffleScale<false>(
                     scale_b_host);
             else
-                return scale_b_host;
+                return scale_b_packed;
         }();
 
         ck_tile::DeviceMem a_dev_buf(a_host.get_element_space_size_in_bytes());
         ck_tile::DeviceMem b_dev_buf(b_host_for_device.get_element_space_size_in_bytes());
         ck_tile::DeviceMem c_dev_buf(c_host.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem scale_a_dev_buf([&]() {
-            if constexpr(GemmConfig::Preshuffle)
-                return scale_a_host_for_device.get_element_space_size_in_bytes();
-            else
-                return scale_a_packed.size() * sizeof(int32_t);
-        }());
-        ck_tile::DeviceMem scale_b_dev_buf([&]() {
-            if constexpr(GemmConfig::Preshuffle)
-                return scale_b_host_for_device.get_element_space_size_in_bytes();
-            else
-                return scale_b_packed.size() * sizeof(int32_t);
-        }());
+        ck_tile::DeviceMem scale_a_dev_buf(
+            scale_a_host_for_device.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem scale_b_dev_buf(
+            scale_b_host_for_device.get_element_space_size_in_bytes());
 
         a_dev_buf.ToDevice(a_host.data());
         b_dev_buf.ToDevice(b_host_for_device.data());
         c_dev_buf.SetZero();
-        if constexpr(GemmConfig::Preshuffle)
-        {
-            scale_a_dev_buf.ToDevice(scale_a_host_for_device.data());
-            scale_b_dev_buf.ToDevice(scale_b_host_for_device.data());
-        }
-        else
-        {
-            scale_a_dev_buf.ToDevice(scale_a_packed.data());
-            scale_b_dev_buf.ToDevice(scale_b_packed.data());
-        }
+        scale_a_dev_buf.ToDevice(scale_a_host_for_device.data());
+        scale_b_dev_buf.ToDevice(scale_b_host_for_device.data());
 
         ScaleM scale_m(reinterpret_cast<ScaleType*>(scale_a_dev_buf.GetDeviceBuffer()));
         ScaleN scale_n(reinterpret_cast<ScaleType*>(scale_b_dev_buf.GetDeviceBuffer()));
