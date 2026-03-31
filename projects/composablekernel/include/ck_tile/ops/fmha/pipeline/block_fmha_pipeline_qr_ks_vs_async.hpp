@@ -500,6 +500,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                 const index_t kv_idx = (kv_load_start + i_total_loops * kN0) / block_scale_size_kv;
                 k_descale            = k_descale_ptr[kv_idx];
             }
+
             auto k_scale_dram_window = [&] {
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
                 {
@@ -528,8 +529,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                 }
             };
             auto k_scale_block_tile = load_k_scale_block_tile();
-
-                        auto run_gemm_0         = [&](auto i_k0) {
+            auto run_gemm_0         = [&](auto i_k0) {
                 auto q_slice =
                     get_slice_tile(q, sequence<0, i_k0 * kK0>{}, sequence<kM0, (i_k0 + 1) * kK0>{});
                 auto k_slice =
@@ -547,7 +547,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                 else
                 {
                     gemm_0(s_acc, q_slice, k_slice);
-                    //schedule_gemm_0();
+                    //  schedule_gemm_0();
                 }
             };
 
@@ -555,7 +555,6 @@ struct BlockFmhaPipelineQRKSVSAsync
             clear_tile(s_acc); // initialize C
             if constexpr(k0_loops > 1)
             {
-             
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
                     async_load_tile_raw(k_lds_store(number<LdsSeq.at(number<i_k0 + 1>{})>{}),
                                         k_dram_window,
@@ -564,38 +563,30 @@ struct BlockFmhaPipelineQRKSVSAsync
                                         k_pre_np);
                     if constexpr(i_k0 < k0_loops - 1)
                         move_tile_window(k_dram_window, {0, kK0});
+
                     async_load_fence(k_dram_window.get_num_of_access());
                     __builtin_amdgcn_s_barrier();
                     __builtin_amdgcn_sched_barrier(0);
-                    block_sync_lds();
                     run_gemm_0(number<i_k0>{});
                     k_scale_block_tile = load_k_scale_block_tile();
-                    block_sync_lds();
                 });
             }
 
             // TODO: this to fix a bug when loop smaller than 2,
             // the following fence/barrier will be scheduled inside 1st loop
-           if constexpr(k0_loops <= 2)
+            if constexpr(k0_loops <= 2)
                 __builtin_amdgcn_sched_barrier(0);
 
             async_load_fence();
-            
             __builtin_amdgcn_s_barrier();
 
             const auto bias_tile = load_tile(bias_dram_window); // load bias tile
             auto v_buf           = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
             __builtin_amdgcn_sched_barrier(0);
             { // tail
-                block_sync_lds();
                 run_gemm_0(number<k0_loops - 1>{});
-                block_sync_lds();
-
             }
-
             __builtin_amdgcn_sched_barrier(1);
-
-            
             // dequant
             auto s_acc_element_func_ = [&s_acc_element_func, k_descale]() {
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
@@ -755,9 +746,10 @@ struct BlockFmhaPipelineQRKSVSAsync
                 store_tile(v_lds_window_tmp,
                            tile_elementwise_in(v_element_func, v_buf)); // store the prefetch
             }
-                          move_tile_window(
-                    v_dram_window,
-                    {0, kK1}); // will have scratch if move this right after load_tile(v_dram)...
+
+            move_tile_window(
+                v_dram_window,
+                {0, kK1}); // will have scratch if move this right after load_tile(v_dram)...
             if constexpr(k1_loops > 1)
             {
                 v_buf = load_tile(
@@ -1012,14 +1004,14 @@ struct BlockFmhaPipelineQRKSVSAsync
             if constexpr(k1_loops > 1)
             {
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
-                    if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
+                    if constexpr(i_k1 != 0)
                     {
                         v_buf = load_tile(
                             v_dram_window, number<-1>{}, bool_constant<false>{}); // load next v_buf
                     }
                     block_sync_lds();
                     run_gemm_1(number<i_k1>{});
-                    block_sync_lds();
+
                     if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
                     {
                         auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
@@ -1042,8 +1034,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                         store_tile(v_lds_window_tmp,
                                    tile_elementwise_in(v_element_func, v_buf)); // store next v_buf
                     }
-                    if constexpr(i_k1 < k1_loops - 1)
-                        move_tile_window(v_dram_window, {0, kK1});
+                    move_tile_window(v_dram_window, {0, kK1});
                     v_scale_block_tile = load_v_scale_block_tile();
                 });
             }
@@ -1052,6 +1043,7 @@ struct BlockFmhaPipelineQRKSVSAsync
             {
                 if constexpr(kHasSink)
                 {
+                    // TODO: this never happens because of i_total_loops++
                     if(i_total_loops == 0)
                     {
                         move_tile_window(k_dram_block_window, {seqlen_k_start - sink_seq_end, 0});
@@ -1080,7 +1072,6 @@ struct BlockFmhaPipelineQRKSVSAsync
             {
                 block_sync_lds();
                 run_gemm_1(number<k1_loops - 1>{});
-                block_sync_lds();
             }
 
             if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
