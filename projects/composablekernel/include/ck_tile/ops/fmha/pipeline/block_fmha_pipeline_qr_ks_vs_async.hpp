@@ -747,11 +747,11 @@ struct BlockFmhaPipelineQRKSVSAsync
                            tile_elementwise_in(v_element_func, v_buf)); // store the prefetch
             }
 
+            move_tile_window(
+                v_dram_window,
+                {0, kK1}); // will have scratch if move this right after load_tile(v_dram)...
             if constexpr(k1_loops > 1)
             {
-                move_tile_window(
-                    v_dram_window,
-                    {0, kK1}); // will have scratch if move this right after load_tile(v_dram)...
                 v_buf = load_tile(
                     v_dram_window, number<-1>{}, bool_constant<false>{}); // load next v_buf
             }
