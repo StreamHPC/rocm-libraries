@@ -1004,7 +1004,7 @@ struct BlockFmhaPipelineQRKSVSAsync
             if constexpr(k1_loops > 1)
             {
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
-                    if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
+                    if constexpr(i_k1 != 0)
                     {
                         v_buf = load_tile(
                             v_dram_window, number<-1>{}, bool_constant<false>{}); // load next v_buf
@@ -1034,8 +1034,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                         store_tile(v_lds_window_tmp,
                                    tile_elementwise_in(v_element_func, v_buf)); // store next v_buf
                     }
-                    if constexpr(i_k1 < k1_loops - 1)
-                        move_tile_window(v_dram_window, {0, kK1});
+                    move_tile_window(v_dram_window, {0, kK1});
                     v_scale_block_tile = load_v_scale_block_tile();
                 });
             }
@@ -1044,6 +1043,7 @@ struct BlockFmhaPipelineQRKSVSAsync
             {
                 if constexpr(kHasSink)
                 {
+                    // TODO: this never happens because of i_total_loops++
                     if(i_total_loops == 0)
                     {
                         move_tile_window(k_dram_block_window, {seqlen_k_start - sink_seq_end, 0});
