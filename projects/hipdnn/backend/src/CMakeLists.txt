@@ -42,6 +42,7 @@ add_library(
     descriptors/MatmulOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
     descriptors/ReductionOperationDescriptor.cpp
+    descriptors/RMSNormBackwardOperationDescriptor.cpp
     descriptors/RMSNormOperationDescriptor.cpp
     descriptors/SdpaBwdOperationDescriptor.cpp
     descriptors/SdpaFwdOperationDescriptor.cpp

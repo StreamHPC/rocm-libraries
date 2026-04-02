@@ -55,6 +55,8 @@ add_executable(
     IntegrationRMSNormDescriptorLifting.cpp
     IntegrationRMSNormDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
+    IntegrationRMSNormBackwardDescriptorLowering.cpp
+    IntegrationRMSNormBackwardDescriptorLifting.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationSdpaBwdDescriptorLowering.cpp
     IntegrationSdpaBwdLifting.cpp

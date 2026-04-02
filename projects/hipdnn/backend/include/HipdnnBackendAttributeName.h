@@ -1093,6 +1093,38 @@ typedef enum
     /** @} */
 
     /**
+     * @name RMSNorm Backward Operation Attributes (3300-3399)
+     * Attributes for HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Gradient input tensor (dy) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT = 3300,
+
+    /** @brief Input tensor (x) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_X_EXT = 3301,
+
+    /** @brief Scale tensor for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_SCALE_EXT = 3302,
+
+    /** @brief Inverse RMS tensor for rmsnorm backward (optional) */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT = 3303,
+
+    /** @brief Gradient output tensor (dx) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT = 3304,
+
+    /** @brief Scale gradient tensor (dscale) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DSCALE_EXT = 3305,
+
+    /** @brief Bias gradient tensor (dbias) for rmsnorm backward (optional) */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DBIAS_EXT = 3306,
+
+    /** @brief Compute data type for rmsnorm backward */
+    HIPDNN_ATTR_RMSNORM_BACKWARD_MATH_PREC_EXT = 3307,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{
