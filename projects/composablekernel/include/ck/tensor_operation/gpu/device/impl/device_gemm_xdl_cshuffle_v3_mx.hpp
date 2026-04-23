@@ -287,8 +287,8 @@ struct DeviceGemmMX_Xdl_CShuffleV3 : public DeviceGemmMX<ALayout,
     struct Invoker : public BaseInvoker
     {
         template <typename GridwiseGemm>
-        float RunImpPartinioned(const typename GridwiseGemm::Argument& arg,
-                                const StreamConfig& stream_config)
+        float RunImpSinglePartition(const typename GridwiseGemm::Argument& arg,
+                                    const StreamConfig& stream_config)
         {
             if(!GridwiseGemm::CheckValidity(arg))
             {
@@ -434,26 +434,28 @@ struct DeviceGemmMX_Xdl_CShuffleV3 : public DeviceGemmMX<ALayout,
                 arg.Print();
                 GridwiseGemm::BlockwiseGemmPipe::HotLoopInstList::Print();
             }
-            
-            if (typename GridwiseGemm::GemmPartitioner(arg).AreDescriptorsSmallerThan2GB())
+
+            if(typename GridwiseGemm::GemmPartitioner(arg).AreDescriptorsSmallerThan2GB())
             {
-                return RunImpPartinioned<GridwiseGemm>(arg, stream_config);
+                return RunImpSinglePartition<GridwiseGemm>(arg, stream_config);
             }
             else
             {
-                if (is_same<CLayout, tensor_layout::gemm::ColumnMajor>::value ||
-                    is_same<ALayout, tensor_layout::gemm::ColumnMajor>::value)
+                if(is_same<CLayout, tensor_layout::gemm::ColumnMajor>::value ||
+                   is_same<ALayout, tensor_layout::gemm::ColumnMajor>::value)
                 {
-                    throw std::runtime_error("Large tensors that exceed 2GB are only supported for RowMajor layout.");
+                    throw std::runtime_error(
+                        "Large tensors that exceed 2GB are only supported for RowMajor layout.");
                 }
 
-                auto [sub_arguments, gemms_number] = GridwiseGemm::partition_gemm_problem(arg);
-                float ave_time = 0;
-                for(index_t i = 0; i < gemms_number; i++)
-                {
-                    ave_time += RunImpPartinioned<GridwiseGemm>(sub_arguments[i], stream_config);
-                }
-                return ave_time;
+                auto sub_arguments = GridwiseGemm::partition_gemm_problem(arg);
+                return std::accumulate(sub_arguments.begin(),
+                                       sub_arguments.end(),
+                                       0,
+                                       [&](float sum, const auto& sub_arg) {
+                                           return sum + RunImpSinglePartition<GridwiseGemm>(
+                                                            sub_arg, stream_config);
+                                       });
             }
         }
 

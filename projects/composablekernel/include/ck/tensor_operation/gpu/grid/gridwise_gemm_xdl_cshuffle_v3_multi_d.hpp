@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <array>
 #include <queue>
+#include <vector>
 
 #include "ck/utility/common_header.hpp"
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
@@ -727,7 +729,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
         index_t NBlock;
     };
 
-    // Argument cicc
+    // Argument
     struct Argument : public tensor_operation::device::BaseArgument, public Problem
     {
         __host__ Argument() = default;
@@ -765,11 +767,6 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             });
         }
 
-        __host__ Argument(const Argument&) = default;
-        __host__ Argument& operator=(const Argument&) = default;
-        __host__ Argument(Argument&&) = default;
-        __host__ Argument& operator=(Argument&&) = default;
-
         const ADataType* p_a_grid;
         const BDataType* p_b_grid;
         DsGridPointer p_ds_grid;
@@ -789,10 +786,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
 
         GemmPartitioner() = default;
         GemmPartitioner(const Argument& arg)
-            : M_{arg.M},
-              StrideA_{arg.StrideA},
-              StrideDs_{arg.StrideDs},
-              StrideC_{arg.StrideC}
+            : M_{arg.M}, StrideA_{arg.StrideA}, StrideDs_{arg.StrideDs}, StrideC_{arg.StrideC}
         {
         }
 
@@ -802,29 +796,29 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
 
             const bool is_A_descriptor_smaller_than_2GB = (M_ * StrideA_) <= TwoGB;
             const bool is_C_descriptor_smaller_than_2GB = (M_ * StrideC_) <= TwoGB;
-            bool are_Ds_descriptors_smaller_than_2GB = true;
+            bool are_Ds_descriptors_smaller_than_2GB    = true;
             static_for<0, NumDTensor, 1>{}([&](auto i) {
                 are_Ds_descriptors_smaller_than_2GB &= (M_ * StrideDs_[i]) <= TwoGB;
             });
 
-            return is_A_descriptor_smaller_than_2GB && is_C_descriptor_smaller_than_2GB && are_Ds_descriptors_smaller_than_2GB;
+            return is_A_descriptor_smaller_than_2GB && is_C_descriptor_smaller_than_2GB &&
+                   are_Ds_descriptors_smaller_than_2GB;
         }
 
-        __host__ auto SplitConvProblem(
-            const ADataType* p_a_grid_left,
-            DsGridPointer &p_ds_grid_left,
-            CDataType* p_c_grid_left) const
+        __host__ auto SplitConvProblem(const ADataType* p_a_grid_left,
+                                       DsGridPointer& p_ds_grid_left,
+                                       CDataType* p_c_grid_left) const
         {
-            auto [M_left, M_right] = [&]{
+            auto [M_left, M_right] = [&] {
                 constexpr index_t BatchSize = 256;
-                index_t left =  (M_ / 2 + BatchSize - 1) / BatchSize * BatchSize;
+                index_t left                = (M_ / 2 + BatchSize - 1) / BatchSize * BatchSize;
                 return std::make_tuple(left, M_ - left);
             }();
 
             GemmPartitioner conv_to_gemm_transformer_left  = *this;
             GemmPartitioner conv_to_gemm_transformer_right = *this;
-            conv_to_gemm_transformer_left.M_ = M_left;
-            conv_to_gemm_transformer_right.M_ = M_right;
+            conv_to_gemm_transformer_left.M_               = M_left;
+            conv_to_gemm_transformer_right.M_              = M_right;
 
             const index_t a_right_offset = M_left * StrideA_;
             const index_t c_right_offset = M_left * StrideC_;
@@ -836,24 +830,20 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                 },
                 Number<NumDTensor>{});
 
-            return ck::make_tuple(
-                conv_to_gemm_transformer_left,
-                conv_to_gemm_transformer_right,
-                p_a_grid_left + a_right_offset,
-                ds_grid_right_ptr,
-                p_c_grid_left + c_right_offset);
+            return ck::make_tuple(conv_to_gemm_transformer_left,
+                                  conv_to_gemm_transformer_right,
+                                  p_a_grid_left + a_right_offset,
+                                  ds_grid_right_ptr,
+                                  p_c_grid_left + c_right_offset);
         }
     };
 
-    template <index_t MaxGemmsNum = 32> 
     static auto partition_gemm_problem(const Argument& arg)
     {
-        constexpr index_t max_split_numbers = MaxGemmsNum / 2;
+        static constexpr index_t InitialSubArgsSize = 32;
 
-        std::array<Argument, MaxGemmsNum> subArguments;
-
-        index_t gemms_number = 0;
-        index_t split_numbers = 0;
+        std::vector<Argument> sub_arguments;
+        sub_arguments.reserve(InitialSubArgsSize);
 
         std::queue<GemmPartitioner> tensors({GemmPartitioner(arg)});
         std::queue<const ADataType*> a_grid_ptrs_queue({arg.p_a_grid});
@@ -866,8 +856,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
         //  2. If descs are smaller than 2GB push to result array.
         //  3. If descs are bigger than 2GB split into left and right transformer.
         //  and push the both into the queue.
-        while(!tensors.empty() && split_numbers < max_split_numbers &&
-                gemms_number < MaxGemmsNum)
+        while(!tensors.empty())
         {
             auto const& tensorSplitter  = tensors.front();
             const ADataType* a_grid_ptr = a_grid_ptrs_queue.front();
@@ -876,12 +865,12 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
 
             if(tensorSplitter.AreDescriptorsSmallerThan2GB())
             {
-                Argument newArgument(arg);
-                newArgument.M = tensorSplitter.M_;
-                newArgument.p_a_grid = a_grid_ptr;
-                newArgument.p_ds_grid = ds_grid_ptr;
-                newArgument.p_c_grid = c_grid_ptr;
-                split_numbers++;
+                Argument newArg(arg);
+                newArg.M         = tensorSplitter.M_;
+                newArg.p_a_grid  = a_grid_ptr;
+                newArg.p_ds_grid = ds_grid_ptr;
+                newArg.p_c_grid  = c_grid_ptr;
+                sub_arguments.emplace_back(std::move(newArg));
             }
             else
             {
@@ -914,7 +903,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             c_grid_ptrs_queue.pop();
         }
 
-        return std::make_tuple(subArguments, gemms_number);
+        return sub_arguments;
     }
 
     struct SplitKBatchOffset

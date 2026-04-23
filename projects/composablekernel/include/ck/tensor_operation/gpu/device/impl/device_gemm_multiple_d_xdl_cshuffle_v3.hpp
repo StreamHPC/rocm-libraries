@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <numeric>
 
 #include "ck/utility/common_header.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
@@ -21,7 +22,6 @@ namespace ck {
 namespace tensor_operation {
 namespace device {
 
-    // cicc
 template <typename ALayout,
           typename BLayout,
           typename DsLayout,
@@ -148,8 +148,8 @@ struct DeviceGemmMultiD_Xdl_CShuffle_V3 : public DeviceGemmMultipleDSplitK<ALayo
     struct Invoker : public BaseInvoker
     {
         template <typename GridwiseGemm>
-        float RunImpPartinioned(const typename GridwiseGemm::Argument& arg,
-                                const StreamConfig& stream_config)
+        float RunImpSinglePartition(const typename GridwiseGemm::Argument& arg,
+                                    const StreamConfig& stream_config)
         {
             if(!GridwiseGemm::CheckValidity(arg))
             {
@@ -641,32 +641,33 @@ struct DeviceGemmMultiD_Xdl_CShuffle_V3 : public DeviceGemmMultipleDSplitK<ALayo
                 arg.Print();
             }
 
-            if (typename GridwiseGemm::GemmPartitioner(arg).AreDescriptorsSmallerThan2GB())
+            if(typename GridwiseGemm::GemmPartitioner(arg).AreDescriptorsSmallerThan2GB())
             {
-                return RunImpPartinioned<GridwiseGemm>(arg, stream_config);
+                return RunImpSinglePartition<GridwiseGemm>(arg, stream_config);
             }
             else
             {
-                bool layoutViolation =
-                    is_same<CLayout, tensor_layout::gemm::ColumnMajor>::value ||
-                    is_same<ALayout, tensor_layout::gemm::ColumnMajor>::value;
+                bool layoutViolation = is_same<CLayout, tensor_layout::gemm::ColumnMajor>::value ||
+                                       is_same<ALayout, tensor_layout::gemm::ColumnMajor>::value;
                 static_for<0, NumDTensor, 1>{}([&](auto i) {
                     using DLayout = remove_cvref_t<tuple_element_t<i.value, DsLayout>>;
                     layoutViolation |= is_same<DLayout, tensor_layout::gemm::ColumnMajor>::value;
                 });
 
-                if (layoutViolation)
+                if(layoutViolation)
                 {
-                    throw std::runtime_error("Large tensors that exceed 2GB are only supported for RowMajor layout.");
+                    throw std::runtime_error(
+                        "Large tensors that exceed 2GB are only supported for RowMajor layout.");
                 }
 
-                auto [sub_arguments, gemms_number] = GridwiseGemm::partition_gemm_problem(arg);
-                float ave_time = 0;
-                for(index_t i = 0; i < gemms_number; i++)
-                {
-                    ave_time += RunImpPartinioned<GridwiseGemm>(sub_arguments[i], stream_config);
-                }
-                return ave_time;
+                auto sub_arguments = GridwiseGemm::partition_gemm_problem(arg);
+                return std::accumulate(sub_arguments.begin(),
+                                       sub_arguments.end(),
+                                       0,
+                                       [&](float sum, const auto& sub_arg) {
+                                           return sum + RunImpSinglePartition<GridwiseGemm>(
+                                                            sub_arg, stream_config);
+                                       });
             }
         }
 
