@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <queue>
+#include <array>
+
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
@@ -673,6 +676,7 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
 
     struct Problem
     {
+        __host__ Problem() = default;
         __host__ Problem(index_t M_,
                          index_t N_,
                          index_t K_,
@@ -735,6 +739,7 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
     // Argument
     struct Argument : public tensor_operation::device::BaseArgument, public Problem
     {
+        __host__ Argument() = default;
         __host__ Argument(const ADataType* p_a_grid_,
                           const AScaleDataType* p_a_scale_grid_,
                           const BDataType* p_b_grid_,
@@ -795,6 +800,142 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
         const CElementwiseOperation c_element_op;
         bool is_reduce;
     };
+
+    struct GemmPartitioner
+    {
+        index_t M_;
+        index_t StrideA_;
+        index_t StrideScaleA_;
+        index_t StrideC_;
+
+        GemmPartitioner() = default;
+        GemmPartitioner(const Argument& arg)
+            : M_{arg.M},
+              StrideA_{arg.StrideA},
+              StrideC_{arg.StrideC}
+        {
+        }
+
+        __host__ bool AreDescriptorsSmallerThan2GB() const
+        {
+            constexpr long_index_t TwoGB = long_index_t{1} << 31;
+
+            const bool is_A_descriptor_smaller_than_2GB = (M_ * StrideA_) <= TwoGB;
+            const bool is_C_descriptor_smaller_than_2GB = (M_ * StrideC_) <= TwoGB;
+
+            return is_A_descriptor_smaller_than_2GB && is_C_descriptor_smaller_than_2GB;
+        }
+
+        __host__ auto SplitConvProblem(
+            const ADataType* p_a_grid_left,
+            const AScaleDataType* p_a_scale_grid_left,
+            CDataType* p_c_grid_left) const
+        {
+            auto [M_left, M_right] = [&]{
+                constexpr index_t BatchSize = 256;
+                index_t left =  (M_ / 2 + BatchSize - 1) / BatchSize * BatchSize;
+                return std::make_tuple(left, M_ - left);
+            }();
+
+            GemmPartitioner conv_to_gemm_transformer_left  = *this;
+            GemmPartitioner conv_to_gemm_transformer_right = *this;
+            conv_to_gemm_transformer_left.M_ = M_left;
+            conv_to_gemm_transformer_right.M_ = M_right;
+
+            const index_t a_right_offset = M_left * StrideA_;
+            const index_t c_right_offset = M_left * StrideC_;
+            const index_t a_scale_right_offset = M_left * StrideScaleA_;
+
+            return ck::make_tuple(
+                conv_to_gemm_transformer_left,
+                conv_to_gemm_transformer_right,
+                p_a_grid_left + a_right_offset,
+                p_a_scale_grid_left + a_scale_right_offset,
+                p_c_grid_left + c_right_offset);
+        }
+    };
+
+    template <index_t MaxGemmsNum = 32> 
+    static auto partition_gemm_problem(const Argument& arg)
+    {
+        constexpr index_t max_split_numbers = MaxGemmsNum / 2;
+
+        std::array<Argument, MaxGemmsNum> subArguments;
+
+        index_t gemms_number = 0;
+        index_t split_numbers = 0;
+
+        std::queue<GemmPartitioner> tensors({GemmPartitioner(arg)});
+        std::queue<const ADataType*> a_grid_ptrs_queue({arg.p_a_grid});
+        std::queue<const AScaleDataType*> a_scale_grid_ptrs_queue({arg.p_a_scale_grid});
+        std::queue<CDataType*> c_grid_ptrs_queue({arg.p_c_grid});
+
+        // Algorithm:
+        // While queue is not empty:
+        //  1. Get transformer from queue.
+        //  2. If descs are smaller than 2GB push to result array.
+        //  3. If descs are bigger than 2GB split into left and right transformer.
+        //  and push the both into the queue.
+        while(!tensors.empty() && split_numbers < max_split_numbers &&
+                gemms_number < MaxGemmsNum)
+        {
+            auto const& tensorSplitter  = tensors.front();
+            const ADataType* a_grid_ptr = a_grid_ptrs_queue.front();
+            const AScaleDataType* a_scale_grid_ptr = a_scale_grid_ptrs_queue.front();
+            CDataType* c_grid_ptr       = c_grid_ptrs_queue.front();
+
+            if(tensorSplitter.AreDescriptorsSmallerThan2GB())
+            {
+                subArguments[gemms_number++] = Argument(a_grid_ptr,
+                                                        a_scale_grid_ptr,
+                                                        arg.p_b_grid,
+                                                        arg.p_b_scale_grid,
+                                                        c_grid_ptr,
+                                                        tensorSplitter.M_,
+                                                        arg.N,
+                                                        arg.K,
+                                                        arg.StrideA,
+                                                        arg.StrideScaleA,
+                                                        arg.StrideB,
+                                                        arg.StrideScaleB,
+                                                        arg.StrideC,
+                                                        arg.KBatch,
+                                                        arg.a_element_op,
+                                                        arg.b_element_op,
+                                                        arg.c_element_op,
+                                                        arg.is_reduce);
+                split_numbers++;
+            }
+            else
+            {
+                GemmPartitioner leftSplitter, rightSplitter;
+                const ADataType* a_grid_right_ptr;
+                const AScaleDataType* a_scale_grid_right_ptr;
+                CDataType* c_grid_right_ptr;
+
+                ck::tie(leftSplitter,
+                        rightSplitter,
+                        a_grid_right_ptr,
+                        a_scale_grid_right_ptr,
+                        c_grid_right_ptr) =
+                    tensorSplitter.SplitConvProblem(a_grid_ptr, a_scale_grid_ptr, c_grid_ptr);
+
+                tensors.push(leftSplitter);
+                tensors.push(rightSplitter);
+
+                a_grid_ptrs_queue.push(a_grid_ptr);
+                a_grid_ptrs_queue.push(a_grid_right_ptr);
+                c_grid_ptrs_queue.push(c_grid_ptr);
+                c_grid_ptrs_queue.push(c_grid_right_ptr);
+            }
+
+            tensors.pop();
+            a_grid_ptrs_queue.pop();
+            c_grid_ptrs_queue.pop();
+        }
+
+        return std::make_tuple(subArguments, gemms_number);
+    }
 
     struct SplitKBatchOffset
     {

@@ -287,15 +287,9 @@ struct DeviceGemmMX_Xdl_CShuffleV3 : public DeviceGemmMX<ALayout,
     struct Invoker : public BaseInvoker
     {
         template <typename GridwiseGemm>
-        float RunImp(const typename GridwiseGemm::Argument& arg,
-                     const StreamConfig& stream_config = StreamConfig{})
+        float RunImpPartinioned(const typename GridwiseGemm::Argument& arg,
+                                const StreamConfig& stream_config)
         {
-            if(stream_config.log_level_ > 0)
-            {
-                arg.Print();
-                GridwiseGemm::BlockwiseGemmPipe::HotLoopInstList::Print();
-            }
-
             if(!GridwiseGemm::CheckValidity(arg))
             {
                 throw std::runtime_error("wrong! GridwiseGemm has invalid setting");
@@ -429,6 +423,38 @@ struct DeviceGemmMX_Xdl_CShuffleV3 : public DeviceGemmMX<ALayout,
                     }
                 });
             return ave_time;
+        }
+
+        template <typename GridwiseGemm>
+        float RunImp(const typename GridwiseGemm::Argument& arg,
+                     const StreamConfig& stream_config = StreamConfig{})
+        {
+            if(stream_config.log_level_ > 0)
+            {
+                arg.Print();
+                GridwiseGemm::BlockwiseGemmPipe::HotLoopInstList::Print();
+            }
+            
+            if (typename GridwiseGemm::GemmPartitioner(arg).AreDescriptorsSmallerThan2GB())
+            {
+                return RunImpPartinioned<GridwiseGemm>(arg, stream_config);
+            }
+            else
+            {
+                if (is_same<CLayout, tensor_layout::gemm::ColumnMajor>::value ||
+                    is_same<ALayout, tensor_layout::gemm::ColumnMajor>::value)
+                {
+                    throw std::runtime_error("Large tensors that exceed 2GB are only supported for RowMajor layout.");
+                }
+
+                auto [sub_arguments, gemms_number] = GridwiseGemm::partition_gemm_problem(arg);
+                float ave_time = 0;
+                for(index_t i = 0; i < gemms_number; i++)
+                {
+                    ave_time += RunImpPartinioned<GridwiseGemm>(sub_arguments[i], stream_config);
+                }
+                return ave_time;
+            }
         }
 
         INVOKER_RUN3_IMPL
