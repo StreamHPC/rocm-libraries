@@ -60,19 +60,19 @@ BEGIN_ROCPRIM_NAMESPACE
  * \code
  * __global__ void ExampleKernel(...)
  * {
- *   // Specialising block_run_length_decode to run-length decode items of type uint64_t
+ *   // Specializing block_run_length_decode to run-length decode items of type uint64_t
  *   using RunItemT = uint64_t;
  *   // Type large enough to index into the run-length decoded array
  *   using RunLengthT = uint32_t;
  *
- *   // Specialising block_run_length_decode for a 1D block of 128 threads
+ *   // Specializing block_run_length_decode for a 1D block of 128 threads
  *   constexpr int BLOCK_DIM_X = 128;
- *   // Specialising block_run_length_decode to have each thread contribute 2 run-length encoded runs
+ *   // Specializing block_run_length_decode to have each thread contribute 2 run-length encoded runs
  *   constexpr int RUNS_PER_THREAD = 2;
- *   // Specialising block_run_length_decode to have each thread hold 4 run-length decoded items
+ *   // Specializing block_run_length_decode to have each thread hold 4 run-length decoded items
  *   constexpr int DECODED_ITEMS_PER_THREAD = 4;
  *
- *   // Specialize BlockRadixSort for a 1D block of 128 threads owning 4 integer items each
+ *   // Specialize block_run_length_decode for a 1D block of 128 threads owning 4 decoded items each
  *   using block_run_length_decodeT =
  *     hipcub::block_run_length_decode<RunItemT, BLOCK_DIM_X, RUNS_PER_THREAD, DECODED_ITEMS_PER_THREAD>;
  *
@@ -153,6 +153,10 @@ private:
     /// Type used to index into the block's runs
     using RunOffsetT = uint32_t;
 
+    // Index of the run containing the last item processed by this thread.
+    // It is reused as the lower-bound hint for the next suffix search.
+    RunOffsetT current_run_state = 0;
+
     /// Shared memory type required by this thread block
     union storage_type_
     {
@@ -178,7 +182,7 @@ public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
     ///
-    /// Depending on the implemention the operations exposed by parallel primitive may
+    /// Depending on the implementation the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
     /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
@@ -188,7 +192,7 @@ public:
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     /**
-   * \brief Constructor specialised for user-provided temporary storage, initializing using the runs' lengths. The
+   * \brief Constructor specialized for user-provided temporary storage, initializing using the runs' lengths. The
    * algorithm's temporary storage may not be repurposed between the constructor call and subsequent
    * <b>run_length_decode</b> calls.
    */
@@ -205,7 +209,7 @@ public:
     }
 
     /**
-     * \brief Constructor specialised for user-provided temporary storage, initializing using the runs' offsets. The
+     * \brief Constructor specialized for user-provided temporary storage, initializing using the runs' offsets. The
      * algorithm's temporary storage may not be repurposed between the constructor call and subsequent
      * <b>run_length_decode</b> calls.
      */
@@ -221,7 +225,7 @@ public:
     }
 
     /**
-     * \brief Constructor specialised for static temporary storage, initializing using the runs' lengths.
+     * \brief Constructor specialized for static temporary storage, initializing using the runs' lengths.
      */
     template<typename RunLengthT, typename TotalDecodedSizeT>
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -235,7 +239,7 @@ public:
     }
 
     /**
-     * \brief Constructor specialised for static temporary storage, initializing using the runs' offsets.
+     * \brief Constructor specialized for static temporary storage, initializing using the runs' offsets.
      */
     template<typename UserRunOffsetT>
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -264,7 +268,7 @@ private:
             temp_storage.runs.run_offsets[thread_dst_offset] = run_offsets[i];
         }
 
-        // Ensure run offsets and run values have been writen to shared memory
+        // Ensure run offsets and run values have been written to shared memory.
         syncthreads();
     }
 
@@ -299,12 +303,19 @@ private:
 
 public:
     /**
-     * \brief Run-length decodes the runs previously passed via a call to Init(...) and returns the run-length decoded
+     * \brief Run-length decodes the runs previously passed via the constructor and returns the run-length decoded
      * items in a blocked arrangement to \p decoded_items. If the number of run-length decoded items exceeds the
      * run-length decode buffer (i.e., <b>DECODED_ITEMS_PER_THREAD * BLOCK_THREADS</b>), only the items that fit within
      * the buffer are returned. Subsequent calls to <b>run_length_decode</b> adjusting \p from_decoded_offset can be
      * used to retrieve the remaining run-length decoded items. Calling __syncthreads() between any two calls to
      * <b>run_length_decode</b> is not required.
+     * 
+     * \note Subsequent calls must use monotonically non-decreasing \p from_decoded_offset values for a given
+     * block_run_length_decode instance. For optimal performance, calls should process consecutive windows, e.g.,
+     * advancing \p from_decoded_offset by <tt>BLOCK_THREADS * DECODED_ITEMS_PER_THREAD</tt> each iteration. The
+     * implementation reuses the previously found run as a lower-bound hint and searches only the remaining suffix of
+     * the run-offset array.
+     *
      * \p item_offsets can be used to retrieve each run-length decoded item's relative index within its run. E.g., the
      * run-length encoded array of `3, 1, 4` with the respective run lengths of `2, 1, 3` would yield the run-length
      * decoded array of `3, 3, 1, 4, 4, 4` with the relative offsets of `0, 1, 0, 0, 1, 2`.
@@ -315,63 +326,56 @@ public:
      * in undefined behavior.
      */
     template<typename RelativeOffsetT>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void
-        run_length_decode(ItemT (&decoded_items)[DECODED_ITEMS_PER_THREAD],
-                          RelativeOffsetT (&item_offsets)[DECODED_ITEMS_PER_THREAD],
-                          DecodedOffsetT from_decoded_offset = 0)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void run_length_decode(ItemT (&decoded_items)[DECODED_ITEMS_PER_THREAD],
+                           RelativeOffsetT (&item_offsets)[DECODED_ITEMS_PER_THREAD],
+                           DecodedOffsetT from_decoded_offset = 0)
     {
         // The (global) offset of the first item decoded by this thread
         DecodedOffsetT thread_decoded_offset
             = from_decoded_offset + linear_tid * DECODED_ITEMS_PER_THREAD;
 
-        // The run that the first decoded item of this thread belongs to
-        // If this thread's <thread_decoded_offset> is already beyond the total decoded size, it will be assigned to the
-        // last run
-        RunOffsetT current_run
-            = rocprim::static_upper_bound<BLOCK_RUNS>(temp_storage.runs.run_offsets,
-                                                      BLOCK_RUNS,
-                                                      thread_decoded_offset)
-              - static_cast<RunOffsetT>(1U);
+        RunOffsetT current_run;
 
-        // Set the current_run_end to thread_decoded_offset to trigger new run branch in the first iteration
-        DecodedOffsetT current_run_begin;
-        DecodedOffsetT current_run_end;
+        // Locate the run containing this thread's first decoded item using the previously saved run as a
+        // lower-bound hint.
+        current_run = rocprim::static_upper_bound<BLOCK_RUNS>(temp_storage.runs.run_offsets
+                                                                  + current_run_state,
+                                                              BLOCK_RUNS - current_run_state,
+                                                              thread_decoded_offset)
+                      + current_run_state - static_cast<RunOffsetT>(1U);
+
+        // Force the first iteration to load the current run's value and bounds.
+        DecodedOffsetT current_run_begin, current_run_end = thread_decoded_offset;
 
         ItemT val{};
 
 #pragma unroll
         for(DecodedOffsetT i = 0; i < DECODED_ITEMS_PER_THREAD; ++i, ++thread_decoded_offset)
         {
-            // Check if we are in a new run. Short-circuit the check on 'i==0', since 'current_run_end'
-            // is uninitialized.
-            if(i == 0 || thread_decoded_offset == current_run_end)
+            // Load a new run when the current decoded offset reaches the cached run end.
+            if(thread_decoded_offset == current_run_end)
             {
-                // The value of the new run
+                // Load the run value and its decoded offset range.
                 val = temp_storage.runs.run_values[current_run];
 
-                // The run bounds
                 current_run_begin = temp_storage.runs.run_offsets[current_run];
-                // Move the cursor to the next run if it exists.
-
-                // Otherwise just use the begin offset if we are the last run of the thread. On the next
-                // iteration, thread_decoded_offset will be moved away from the begin offset and we will
-                // emit infinite elements until the call-site detects we are outside the decoded values
-                // per thread.
-                if(current_run + 1 < BLOCK_RUNS)
-                {
-                    current_run++;
-                }
-                current_run_end = temp_storage.runs.run_offsets[current_run];
+                current_run_end   = temp_storage.runs.run_offsets[++current_run];
             }
 
             // Decode the current run by storing the run's value
             decoded_items[i] = val;
             item_offsets[i]  = thread_decoded_offset - current_run_begin;
         }
+
+        // Save the run containing the last item processed by this thread.
+        // current_run has been advanced while loading the next run bound, so subtract one.
+        // The saved run is used as the lower-bound hint for the next suffix search.
+        current_run_state = current_run - 1;
     }
 
     /**
-     * \brief Run-length decodes the runs previously passed via a call to Init(...) and returns the run-length decoded
+     * \brief Run-length decodes the runs previously passed via the constructor and returns the run-length decoded
      * items in a blocked arrangement to \p decoded_items. If the number of run-length decoded items exceeds the
      * run-length decode buffer (i.e., <b>DECODED_ITEMS_PER_THREAD * BLOCK_THREADS</b>), only the items that fit within
      * the buffer are returned. Subsequent calls to <b>run_length_decode</b> adjusting \p from_decoded_offset can be
@@ -382,9 +386,9 @@ public:
      * \param[in] from_decoded_offset If invoked with from_decoded_offset that is larger than total_decoded_size results
      * in undefined behavior.
      */
-    ROCPRIM_DEVICE ROCPRIM_INLINE void
-        run_length_decode(ItemT (&decoded_items)[DECODED_ITEMS_PER_THREAD],
-                          DecodedOffsetT from_decoded_offset = 0)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void run_length_decode(ItemT (&decoded_items)[DECODED_ITEMS_PER_THREAD],
+                           DecodedOffsetT from_decoded_offset = 0)
     {
         DecodedOffsetT item_offsets[DECODED_ITEMS_PER_THREAD];
         run_length_decode(decoded_items, item_offsets, from_decoded_offset);
