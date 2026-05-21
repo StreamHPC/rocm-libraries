@@ -31,6 +31,7 @@
 #include "ck_tile/ops/gemm/block/block_wp_asmem_breg_creg.hpp"
 #include "ck_tile/ops/gemm/block/block_wp_asmem_bsmem_creg_v1.hpp"
 #include "ck_tile/ops/gemm/block/block_wp_asmem_bsmem_creg_v1_custom_policy.hpp"
+#include "ck_tile/ops/gemm_mx/kernel/grouped_gemm_mx_kernel.hpp"
 #include "ck_tile/ops/gemm/kernel/batched_gemm_kernel.hpp"
 #include "ck_tile/ops/gemm/kernel/gemm_kernel.hpp"
 #include "ck_tile/ops/gemm/kernel/gemm_multi_abd_kernel.hpp"

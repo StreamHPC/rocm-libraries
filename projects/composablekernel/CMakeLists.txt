@@ -751,9 +751,9 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
             PACKAGE_NAME tutorials
        )
    endif()
-   if(BUILD_CK_TILE_ENGINE)
-       add_subdirectory(tile_engine)
-   endif()
+#    if(BUILD_CK_TILE_ENGINE)
+#        add_subdirectory(tile_engine)
+#    endif()
    if(BUILD_TESTING)
        rocm_package_setup_component(tests
             LIBRARY_NAME composablekernel
