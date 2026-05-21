@@ -547,9 +547,9 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
         const int64_t r = *std::next(std::begin(ref), i);
         err             = std::abs(o - r);
 
+        max_err = err > max_err ? err : max_err;
         if(err > atol)
         {
-            max_err = err > max_err ? err : max_err;
             err_count++;
             if(err_count < ERROR_DETAIL_LIMIT)
             {
@@ -559,8 +559,9 @@ std::enable_if_t<(std::is_same_v<ranges::range_value_t<Range>, ranges::range_val
             res = false;
         }
     }
-    if(!res)
+    // if(!res)
     {
+        std::cerr << msg << " ";
         report_error_stats(err_count, static_cast<double>(max_err), ref.size());
     }
     return res;
