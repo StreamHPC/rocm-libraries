@@ -585,14 +585,27 @@ class Dropout : public TestWithParam<std::tuple<std::tuple<int, int>,
 
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                          Dropout,
-                         Combine(HDimValues,
+                         Combine(Values(std::tuple{32, -1},
+                                        std::tuple{64, -1},
+                                        std::tuple{96, 128},
+                                        std::tuple{128, -1},
+                                        std::tuple{192, 128},
+                                        std::tuple{192, -1},
+                                        std::tuple{256, -1},
+                                        std::tuple{160, -1},
+                                        std::tuple{224, -1}),
                                  ModeValues,
                                  Values(0.123f, 0.5f),
                                  Values(std::tuple{10, 123, false},
                                         std::tuple{34534564645, 7876878876864, true}),
                                  Values(std::tuple{2, 4, 2, 280, 512, "0"},
                                         std::tuple{3, 2, 2, 256, 128, "1"},
-                                        std::tuple{4, 3, 1, 100, 768, "2"})));
+                                        std::tuple{4, 3, 1, 100, 768, "2"},
+                                        std::tuple{1, 3, 1, 2048, 2048, "0"},
+                                        std::tuple{1, 2, 2, 2048, 2048, "1"},
+                                        std::tuple{1, 4, 1, 1024, 1023, "0"},
+                                        std::tuple{1, 3, 3, 1024, 1023, "1"},
+                                        std::tuple{1, 2, 2, 1023, 1024, "1"})));
 
 TEST_P(Dropout, DataTypeConfig)
 {

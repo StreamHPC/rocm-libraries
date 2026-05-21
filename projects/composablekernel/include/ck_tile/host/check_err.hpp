@@ -302,6 +302,18 @@ check_err(const Range& out,
         return either_not_finite && !(allow_infinity_ref && both_infinite_and_same);
     };
 
+    printf("\n");
+    printf("ref.size(): %zu\n", ref.size());
+    for(std::size_t i = 0; i < ref.size(); ++i)
+    {
+        if(i % 123 == 0)
+        {
+            const double o = *std::next(std::begin(out), i);
+            const double r = *std::next(std::begin(ref), i);
+            printf("%6zu: %e %e %e\n", i, o, r, std::abs(o - r));
+        }
+    }
+
     bool res{true};
     int err_count  = 0;
     double err     = 0;
@@ -311,9 +323,9 @@ check_err(const Range& out,
         const double o = *std::next(std::begin(out), i);
         const double r = *std::next(std::begin(ref), i);
         err            = std::abs(o - r);
+        max_err = err > max_err ? err : max_err;
         if(err > atol + rtol * std::abs(r) || is_infinity_error(o, r))
         {
-            max_err = err > max_err ? err : max_err;
             err_count++;
             if(err_count < ERROR_DETAIL_LIMIT)
             {
@@ -323,7 +335,7 @@ check_err(const Range& out,
             res = false;
         }
     }
-    if(!res)
+    // if(!res)
     {
         report_error_stats(err_count, max_err, ref.size());
     }
@@ -369,6 +381,19 @@ check_err(const Range& out,
         return either_not_finite && !(allow_infinity_ref && both_infinite_and_same);
     };
 
+    printf("\n");
+    const std::size_t WWWW = 128;
+    printf("ref.size(): %zu\n", ref.size());
+    for(std::size_t i = 0; i < ref.size(); ++i)
+    {
+        if(i % 123 == 0)
+        {
+            const double o = type_convert<float>(*std::next(std::begin(out), i));
+            const double r = type_convert<float>(*std::next(std::begin(ref), i));
+            printf("%6zu %3zu %3zu: %e %e %e\n", i, i / WWWW, i % WWWW, o, r, std::abs(o - r));
+        }
+    }
+
     bool res{true};
     int err_count = 0;
     double err    = 0;
@@ -379,9 +404,9 @@ check_err(const Range& out,
         const double o = type_convert<float>(*std::next(std::begin(out), i));
         const double r = type_convert<float>(*std::next(std::begin(ref), i));
         err            = std::abs(o - r);
+        max_err = err > max_err ? err : max_err;
         if(err > atol + rtol * std::abs(r) || is_infinity_error(o, r))
         {
-            max_err = err > max_err ? err : max_err;
             err_count++;
             if(err_count < ERROR_DETAIL_LIMIT)
             {
@@ -391,7 +416,7 @@ check_err(const Range& out,
             res = false;
         }
     }
-    if(!res)
+    // if(!res)
     {
         report_error_stats(err_count, max_err, ref.size());
     }
@@ -438,6 +463,19 @@ check_err(const Range& out,
         return either_not_finite && !(allow_infinity_ref && both_infinite_and_same);
     };
 
+    printf("\n");
+    const std::size_t WWWW = 128;
+    printf("ref.size(): %zu\n", ref.size());
+    for(std::size_t i = 0; i < ref.size(); ++i)
+    {
+        if(i % 123 == 0)
+        {
+            const double o = type_convert<float>(*std::next(std::begin(out), i));
+            const double r = type_convert<float>(*std::next(std::begin(ref), i));
+            printf("%6zu %3zu %3zu: %e %e %e\n", i, i / WWWW, i % WWWW, o, r, std::abs(o - r));
+        }
+    }
+
     bool res{true};
     int err_count  = 0;
     double err     = 0;
@@ -447,9 +485,9 @@ check_err(const Range& out,
         const double o = type_convert<float>(*std::next(std::begin(out), i));
         const double r = type_convert<float>(*std::next(std::begin(ref), i));
         err            = std::abs(o - r);
+        max_err = err > max_err ? err : max_err;
         if(err > atol + rtol * std::abs(r) || is_infinity_error(o, r))
         {
-            max_err = err > max_err ? err : max_err;
             err_count++;
             if(err_count < ERROR_DETAIL_LIMIT)
             {
@@ -459,7 +497,7 @@ check_err(const Range& out,
             res = false;
         }
     }
-    if(!res)
+    // if(!res)
     {
         report_error_stats(err_count, max_err, ref.size());
     }
