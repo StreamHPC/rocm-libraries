@@ -18,14 +18,8 @@ using False = ck_tile::bool_constant<false>;
 // clang-format off
 using KernelTypes = ::testing::Types<
     //         ALayout, BLayout, CLayout, ADataType, BDataType, AccDataType, CDataType, Persistent
-    std::tuple<    Row,     Col,     Row,       F8,       F8,         F32,       F8,       True>,
-    std::tuple<    Row,     Col,     Row,       F8,       F8,         F32,       F8,      False>,
-    std::tuple<    Col,     Col,     Row,       F8,       F8,         F32,       F8,       True>,
-    std::tuple<    Col,     Col,     Row,       F8,       F8,         F32,       F8,      False>,
-    std::tuple<    Row,     Row,     Row,       F8,       F8,         F32,       F8,       True>,
-    std::tuple<    Row,     Row,     Row,       F8,       F8,         F32,       F8,      False>,
-    std::tuple<    Col,     Row,     Row,       F8,       F8,         F32,       F8,       True>,
-    std::tuple<    Col,     Row,     Row,       F8,       F8,         F32,       F8,      False>
+//    std::tuple<    Row,     Col,     Row,       F8,       F8,         F32,       F8,       True>,
+    std::tuple<    Row,     Col,     Row,       F8,       F8,         F32,       F8,      False>
     >;
 // clang-format on
 

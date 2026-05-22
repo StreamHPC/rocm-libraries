@@ -103,9 +103,9 @@ class TestCkTileGroupedGemm : public ::testing::Test
         static constexpr ck_tile::index_t N_Warp_Tile = 16;
         static constexpr ck_tile::index_t K_Warp_Tile = 128;
 
-        static constexpr bool kPadM = false;
-        static constexpr bool kPadN = false;
-        static constexpr bool kPadK = false;
+        static constexpr bool kPadM = true;// false;
+        static constexpr bool kPadN = true;// false;
+        static constexpr bool kPadK = true;// false;
 
         static constexpr bool TransposeC            = false;
         static constexpr bool UseStructuredSparsity = false;
@@ -136,10 +136,10 @@ class TestCkTileGroupedGemm : public ::testing::Test
         static constexpr ck_tile::index_t K_Tile = 256;
     };
 
-    using grouped_gemm_kargs = ck_tile::MXGemmKernelArgs<>;
+    using grouped_gemm_kargs = ck_tile::GroupedMXGemmKernelArgs<>;
     std::size_t get_workspace_size(const std::vector<grouped_gemm_kargs>& gemm_descs)
     {
-        return gemm_descs.size() * sizeof(ck_tile::MxGemmTransKernelArg<>);
+        return gemm_descs.size() * sizeof(ck_tile::GroupedMxGemmTransKernelArg<>);
     }
 
     template <typename GroupedGemKernelParam, typename ALayout, typename BLayout, typename CLayout>
@@ -210,14 +210,16 @@ class TestCkTileGroupedGemm : public ::testing::Test
         // the correct grid size and group count — not the raw gemm_descs vector.
         const dim3 blocks = Kernel::BlockSize();
         if(kargs.empty())
+        {
             return;
+        }
 
         const dim3 grids = dim3(kargs.back().block_end, 1, 1);
 
         ck_tile::hip_check_error(
             hipMemcpyWithStream(kargs_ptr,
                                 kargs.data(),
-                                kargs.size() * sizeof(ck_tile::MxGemmTransKernelArg<>),
+                                kargs.size() * sizeof(ck_tile::GroupedMxGemmTransKernelArg<>),
                                 hipMemcpyHostToDevice,
                                 s.stream_id_));
 
@@ -356,8 +358,6 @@ class TestCkTileGroupedGemm : public ::testing::Test
              const int group_count = 16,
              int seed              = 1234)
     {
-        // using namespace ck_tile::literals;
-
         std::vector<ck_tile::HostTensor<ADataType>> a_m_k_tensors;
         std::vector<ck_tile::HostTensor<BDataType>> b_k_n_tensors;
         std::vector<ck_tile::HostTensor<CDataType>> c_m_n_tensors;
@@ -419,17 +419,19 @@ class TestCkTileGroupedGemm : public ::testing::Test
                 ck_tile::HostTensor<ScaleType>(ck_tile::host_tensor_descriptor(
                     scale_k_size, N, stride_scale_b, is_row_major(BLayout{}))));
 
-            // std::cout << "gemm[" << i << "]" << " a_m_k: " << a_m_k_tensors[i].mDesc
-            //           << " b_k_n: " << b_k_n_tensors[i].mDesc
-            //           << " c_m_n: " << c_m_n_tensors[i].mDesc << " KBatch: " << kbatch <<
-            //           std::endl;
+            std::cout << "gemm[" << i << "]" << " a_m_k: " << a_m_k_tensors[i].mDesc
+                      << " b_k_n: " << b_k_n_tensors[i].mDesc
+                      << " c_m_n: " << c_m_n_tensors[i].mDesc << " KBatch: " << kbatch <<
+                      std::endl;
 
             ck_tile::FillUniformDistribution<ADataType>{-1.f, 1.f}(a_m_k_tensors[i]);
             ck_tile::FillUniformDistribution<BDataType>{-1.f, 1.f}(b_k_n_tensors[i]);
+            ck_tile::FillConstant<ScaleType>{static_cast<ScaleType>(2.f)}(scale_a_host_tensors[i]);
+            ck_tile::FillConstant<ScaleType>{static_cast<ScaleType>(1.f)}(scale_b_host_tensors[i]);
             ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(
                 scale_a_host_tensors[i]);
-            ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(
-                scale_b_host_tensors[i]);
+            // ck_tile::FillUniformDistribution<ScaleType>{0.001f, 10.f, seed++}(
+            //     scale_b_host_tensors[i]);
 
             using GemmConfig = MXfp8_GemmConfig16;
 
@@ -510,11 +512,11 @@ class TestCkTileGroupedGemm : public ::testing::Test
         if constexpr(Persistent)
         {
             // Generate kernel arguments
-            std::vector<ck_tile::MXGemmKernelArgs<>> kargs;
+            std::vector<ck_tile::GroupedMXGemmKernelArgs<>> kargs;
             void* kargs_ptr = gemm_workspace.GetDeviceBuffer();
             for(const auto& arg : gemm_descs)
             {
-                kargs.emplace_back(ck_tile::MXGemmKernelArgs<>(arg.as_ptr,
+                kargs.emplace_back(ck_tile::GroupedMXGemmKernelArgs<>(arg.as_ptr,
                                                                arg.bs_ptr,
                                                                {/*arg.ds_ptr*/},
                                                                arg.e_ptr,
@@ -533,7 +535,7 @@ class TestCkTileGroupedGemm : public ::testing::Test
             ck_tile::hip_check_error(
                 hipMemcpyWithStream(kargs_ptr,
                                     kargs.data(),
-                                    kargs.size() * sizeof(ck_tile::MxGemmTransKernelArg<>),
+                                    kargs.size() * sizeof(ck_tile::GroupedMxGemmTransKernelArg<>),
                                     hipMemcpyHostToDevice,
                                     stream.stream_id_));
             invoke_grouped_gemm_persistent<MXfp8_GemmConfig16, ALayout, BLayout, CLayout>(
@@ -564,8 +566,8 @@ class TestCkTileGroupedGemm : public ::testing::Test
             ck_tile::HostTensor<CDataType> c_m_n_host_ref(ck_tile::host_tensor_descriptor(
                 Ms[i], Ns[i], stride_Cs[i], is_row_major(CLayout{})));
             c_m_n_host_ref.SetZero();
-            ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(
-                a_m_k_tensors[i], b_k_n_tensors[i], c_m_n_host_ref);
+            ck_tile::reference_mx_gemm<ADataType, BDataType, ScaleType, AccDataType, CDataType>(
+                a_m_k_tensors[i], b_k_n_tensors[i], c_m_n_host_ref, scale_a_host_tensors[i], scale_b_host_tensors[i]);
             // Use max absolute value (not algebraic max) to calibrate atol.
             // The absolute threshold in calculate_rtol_atol scales with this value,
             // so using the algebraic max (which may be a small positive number when

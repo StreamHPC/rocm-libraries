@@ -19,11 +19,11 @@ template <typename ScaleM    = MXScalePointer<e8m0_t, 1, 32>,
           index_t NumATensor = 1,
           index_t NumBTensor = 1,
           index_t NumDTensor = 0>
-struct MXGemmKernelArgs : UniversalGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>
+struct GroupedMXGemmKernelArgs : UniversalGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>
 {
     using Base = UniversalGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>;
 
-    CK_TILE_HOST MXGemmKernelArgs(const std::array<const void*, NumATensor>& as_ptr_,
+    CK_TILE_HOST GroupedMXGemmKernelArgs(const std::array<const void*, NumATensor>& as_ptr_,
                                   const std::array<const void*, NumBTensor>& bs_ptr_,
                                   const std::array<const void*, NumDTensor>& ds_ptr_,
                                   void* e_ptr_,
@@ -63,23 +63,23 @@ template <typename ScaleM    = MXScalePointer<e8m0_t, 1, 32>,
           index_t NumATensor = 1,
           index_t NumBTensor = 1,
           index_t NumDTensor = 0>
-struct MxGemmTransKernelArg
+struct GroupedMxGemmTransKernelArg
 {
-    MXGemmKernelArgs<ScaleM, ScaleN, NumATensor, NumBTensor, NumDTensor> group_karg;
+    GroupedMXGemmKernelArgs<ScaleM, ScaleN, NumATensor, NumBTensor, NumDTensor> group_karg;
     ck_tile::index_t block_start;
     ck_tile::index_t block_end;
 
-    MxGemmTransKernelArg() = delete;
-    MxGemmTransKernelArg(
-        MXGemmKernelArgs<ScaleM, ScaleN, NumATensor, NumBTensor, NumDTensor>&& karg,
+    GroupedMxGemmTransKernelArg() = delete;
+    GroupedMxGemmTransKernelArg(
+        GroupedMXGemmKernelArgs<ScaleM, ScaleN, NumATensor, NumBTensor, NumDTensor>&& karg,
         index_t bl_start,
         index_t bl_end)
         : group_karg{std::move(karg)}, block_start{bl_start}, block_end{bl_end}
     {
     }
 
-    MxGemmTransKernelArg(
-        MXGemmKernelArgs<ScaleM, ScaleN, NumATensor, NumBTensor, NumDTensor>&& karg)
+    GroupedMxGemmTransKernelArg(
+        GroupedMXGemmKernelArgs<ScaleM, ScaleN, NumATensor, NumBTensor, NumDTensor>&& karg)
         : group_karg{std::move(karg)}, block_start{0}, block_end{0}
     {
     }
@@ -162,10 +162,10 @@ struct GroupedMXGemmKernel
                   "The size of DsLayout and DsDataType should be the same");
 
     template <typename ScaleM, typename ScaleN>
-    using KernelArgs = MxGemmTransKernelArg<ScaleM, ScaleN, NumATensor, NumBTensor, NumDTensor>;
+    using KernelArgs = GroupedMxGemmTransKernelArg<ScaleM, ScaleN, NumATensor, NumBTensor, NumDTensor>;
 
     template <typename ScaleM, typename ScaleN>
-    using GroupKernelArgs = MXGemmKernelArgs<ScaleM, ScaleN, NumATensor, NumBTensor, NumDTensor>;
+    using GroupKernelArgs = GroupedMXGemmKernelArgs<ScaleM, ScaleN, NumATensor, NumBTensor, NumDTensor>;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
@@ -279,10 +279,16 @@ struct GroupedMXGemmKernel
 
     template <typename ScaleM, typename ScaleN>
     CK_TILE_HOST static bool
-    IsSupportedArgument(const std::vector<MxGemmTransKernelArg<ScaleM, ScaleN>>& kargs)
+    IsSupportedArgument(const std::vector<GroupedMxGemmTransKernelArg<ScaleM, ScaleN>>& kargs)
     {
         for(const auto& karg : kargs)
         {
+            printf("%i %i\n", int(karg.group_karg.K), int(KPerBlock_));
+            if (karg.group_karg.K % KPerBlock_ != 0)
+            {
+                return false;
+            }
+
             if(!Underlying::IsSupportedArgument(karg.group_karg))
             {
                 return false;
