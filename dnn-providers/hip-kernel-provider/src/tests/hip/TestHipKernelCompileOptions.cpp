@@ -28,12 +28,13 @@ protected:
     std::unique_ptr<GraphWrapper> _graph;
 
     void setUpTestCase(DataType dataType = DataType::FLOAT,
-                       TensorLayout layout = TensorLayout::NCHW)
+                       TensorLayout layout = TensorLayout::NCHW,
+                       const char* archName = "gfx942")
     {
         // Setup Device Properties
         _deviceProps.multiProcessorCount = 60;
         _deviceProps.warpSize = 64;
-        std::snprintf(_deviceProps.gcnArchName, sizeof(_deviceProps.gcnArchName), "%s", "gfx942");
+        std::snprintf(_deviceProps.gcnArchName, sizeof(_deviceProps.gcnArchName), "%s", archName);
 
         // Set ROCM_PATH (to default path on linux)
         hipdnn_data_sdk::utilities::setEnv("ROCM_PATH", "/opt/rocm");
@@ -97,6 +98,14 @@ TEST_F(TestHipKernelCompileOptionsNchwFp32, VerifiesOptions)
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_RNE_BFLOAT16=1"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FPMIX=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFPMIX=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_AMDGCN=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX103X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX110X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX115X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX120X=0"));
     EXPECT_TRUE(hasOption(options, "--offload-arch=gfx942"));
 }
 
@@ -115,6 +124,14 @@ TEST_F(TestHipKernelCompileOptionsNhwcBfp16, VerifiesOptions)
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFP16=1"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_RNE_BFLOAT16=1"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FPMIX=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFPMIX=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_AMDGCN=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX103X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX110X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX115X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX120X=0"));
     EXPECT_TRUE(hasOption(options, "--offload-arch=gfx942"));
 }
 
@@ -134,6 +151,14 @@ TEST_F(TestHipKernelCompileOptions, VerifyAddCustomOptions)
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_RNE_BFLOAT16=1"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FPMIX=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFPMIX=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_AMDGCN=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX103X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX110X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX115X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX120X=0"));
     EXPECT_TRUE(hasOption(options, "--offload-arch=gfx942"));
 
     // Verify custom options
@@ -142,20 +167,26 @@ TEST_F(TestHipKernelCompileOptions, VerifyAddCustomOptions)
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_TEST_BOOL=1"));
 }
 
-TEST_F(TestHipKernelCompileOptions, VerifiesActivationOption)
+TEST_F(TestHipKernelCompileOptions, VerifiesArchOptions)
 {
-    setUpTestCase(DataType::HALF, TensorLayout::NHWC);
+    setUpTestCase(DataType::HALF, TensorLayout::NHWC, "gfx110");
 
-    const HipKernelCompileOptions options(
-        _inputTensorAttrs, _deviceProps, hip_kernel_utils::ActivationMode::RELU);
+    const HipKernelCompileOptions options(_inputTensorAttrs, _deviceProps);
 
     EXPECT_TRUE(hasOption(options, "-I/opt/rocm/include"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_NHWC=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFP16=0"));
-    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_NRN_OP_ID=3"));
-    EXPECT_TRUE(hasOption(options, "--offload-arch=gfx942"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_RNE_BFLOAT16=1"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FPMIX=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFPMIX=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_AMDGCN=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX103X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX110X=1"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX115X=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX120X=0"));
+    EXPECT_TRUE(hasOption(options, "--offload-arch=gfx110"));
 }
 
 };
