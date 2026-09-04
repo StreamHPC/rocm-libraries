@@ -13,7 +13,8 @@ struct GemmConfigTwoStage : public GemmConfigComputeV3<PrecType_>
 template <typename PrecType_, typename WorkspaceType_>
 struct GemmConfigTwoStage_Wmma : public GemmConfigComputeV3_WMMA<PrecType_>
 {
-    using WorkspaceType = ck_tile::remove_cvref_t<WorkspaceType_>;
+    using WorkspaceType                      = ck_tile::remove_cvref_t<WorkspaceType_>;
+    static constexpr bool EnableKPadFallback = false; // TODO invoker not supported yet
 };
 
 struct SplitKTwoStageInvoker
