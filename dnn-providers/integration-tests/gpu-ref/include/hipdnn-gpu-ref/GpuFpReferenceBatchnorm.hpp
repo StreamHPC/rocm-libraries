@@ -616,9 +616,9 @@ private:
         static_assert(IS_SUPPORTED_DATA_TYPE<DxDataType>,
                       "Batchnorm backward supports only double, float, half, and bfloat16 dx data "
                       "types.");
-        static_assert(IS_SUPPORTED_DATA_TYPE<ComputeDataType>,
-                      "Batchnorm backward supports only double, float, half, and bfloat16 compute "
-                      "data types.");
+        static_assert(std::is_same_v<ComputeDataType, float>
+                          || std::is_same_v<ComputeDataType, double>,
+                      "Batchnorm backward requires float or double compute data types.");
     }
 
     // --- Kernel launchers (defined in GpuFpReferenceBatchnorm.cpp) ---
