@@ -21,7 +21,9 @@ struct GemmPipelineAgBgCrCompTDMV1;
  * specialization.
  *
  */
+#ifndef BARRIER_ATOMIC_IN_TDM
 #define BARRIER_ATOMIC_IN_TDM 0
+#endif
 template <typename Problem, typename Policy = GemmPipelineAgBgCrCompTDMDefaultPolicy<true>>
 struct GemmPipelineAgBgCrCompTDMV2 : public GemmPipelineAgBgCrCompTDMV1<Problem, Policy>
 {
