@@ -211,6 +211,28 @@ struct WmmaTraits<gfx125_t, uint8_t, uint8_t, uint32_t, 16, 16, 64>
     }
 };
 
+// EXPERIMENT (not for merge): pin CK_TILE_EXPERIMENT_FP8_WMMA_PAD v_nop after each fp8/bf8 WMMA,
+// between scheduling barriers. 8 keeps a VALU write of an A/B source as far from the WMMA as the
+// compiler places it after the iu8 WMMA; 1 matches what the compiler emits for fp8 (control with
+// the same barriers).
+#ifdef CK_TILE_EXPERIMENT_FP8_WMMA_PAD
+#define CK_TILE_EXPERIMENT_FP8_WMMA_PAD_STR2(n) #n
+#define CK_TILE_EXPERIMENT_FP8_WMMA_PAD_STR(n) CK_TILE_EXPERIMENT_FP8_WMMA_PAD_STR2(n)
+#define CK_TILE_EXPERIMENT_FP8_WMMA_PAD_AFTER(expr)                            \
+    [&] {                                                                      \
+        __builtin_amdgcn_sched_barrier(0);                                     \
+        auto r_ = (expr);                                                      \
+        __builtin_amdgcn_sched_barrier(0);                                     \
+        asm volatile(".rept " CK_TILE_EXPERIMENT_FP8_WMMA_PAD_STR(             \
+                         CK_TILE_EXPERIMENT_FP8_WMMA_PAD) "\n\tv_nop\n\t.endr" \
+                     : "+v"(r_)::);                                            \
+        __builtin_amdgcn_sched_barrier(0);                                     \
+        return r_;                                                             \
+    }()
+#else
+#define CK_TILE_EXPERIMENT_FP8_WMMA_PAD_AFTER(expr) (expr)
+#endif
+
 // fp8/bf8 specialization - GFX125
 template <>
 struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 64>
@@ -224,12 +246,13 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 64>
     {
 #ifdef __gfx125__
         using P = WarpGemmParamsParser<Params...>;
-        return __builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(bit_cast<int32x8_t>(a_vec),
-                                                          bit_cast<int32x8_t>(b_vec),
-                                                          0,
-                                                          bit_cast<fp32x8_t>(c_vec),
-                                                          P::reuse_a,
-                                                          P::reuse_b);
+        return CK_TILE_EXPERIMENT_FP8_WMMA_PAD_AFTER(
+            __builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(bit_cast<int32x8_t>(a_vec),
+                                                       bit_cast<int32x8_t>(b_vec),
+                                                       0,
+                                                       bit_cast<fp32x8_t>(c_vec),
+                                                       P::reuse_a,
+                                                       P::reuse_b));
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;
@@ -251,12 +274,13 @@ struct WmmaTraits<gfx125_t, bf8_t, bf8_t, float, 16, 16, 64>
     {
 #ifdef __gfx125__
         using P = WarpGemmParamsParser<Params...>;
-        return __builtin_amdgcn_wmma_f32_16x16x64_bf8_bf8(bit_cast<int32x8_t>(a_vec),
-                                                          bit_cast<int32x8_t>(b_vec),
-                                                          0,
-                                                          bit_cast<fp32x8_t>(c_vec),
-                                                          P::reuse_a,
-                                                          P::reuse_b);
+        return CK_TILE_EXPERIMENT_FP8_WMMA_PAD_AFTER(
+            __builtin_amdgcn_wmma_f32_16x16x64_bf8_bf8(bit_cast<int32x8_t>(a_vec),
+                                                       bit_cast<int32x8_t>(b_vec),
+                                                       0,
+                                                       bit_cast<fp32x8_t>(c_vec),
+                                                       P::reuse_a,
+                                                       P::reuse_b));
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;
