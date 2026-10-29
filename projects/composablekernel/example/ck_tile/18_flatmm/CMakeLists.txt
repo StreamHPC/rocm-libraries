@@ -22,7 +22,14 @@ if(has_supported_gpu)
     if(CK_USE_OCP_FP8)
         list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS -DCK_TILE_USE_OCP_FP8)
     endif()
-    list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS "SHELL: -mllvm -greedy-reverse-local-assignment=1")
+    # [WIP diag, issue 509] the gtests build the same MX TDM instances with
+    # -enable-noalias-to-md-conversion=0 instead and pass where these examples fail.
+    # Empty means no -mllvm flag at all.
+    set(CK_FLATMM_EXAMPLE_MLLVM "-greedy-reverse-local-assignment=1" CACHE STRING
+        "Semicolon-separated -mllvm flags for the 18_flatmm examples")
+    foreach(flag IN LISTS CK_FLATMM_EXAMPLE_MLLVM)
+        list(APPEND EXAMPLE_FLATMM_COMPILE_OPTIONS "SHELL: -mllvm ${flag}")
+    endforeach()
     add_executable(tile_example_flatmm_basic flatmm_basic.cpp)
     target_compile_options(tile_example_flatmm_basic PRIVATE ${EXAMPLE_FLATMM_COMPILE_OPTIONS})
 
