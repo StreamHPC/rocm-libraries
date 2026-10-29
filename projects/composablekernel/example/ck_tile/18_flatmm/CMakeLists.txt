@@ -5,6 +5,8 @@ set(SUPPORTED_GPUS gfx908 gfx90a gfx942 gfx950 gfx1201 gfx1250)
 
 set(has_supported_gpu FALSE)
 foreach(gpu IN LISTS GPU_TARGETS)
+    # gfx1250-strict is the same ISA family as gfx1250; strip the suffix before the exact match.
+    string(REGEX REPLACE "-strict$" "" gpu "${gpu}")
     if(gpu IN_LIST SUPPORTED_GPUS)
         set(has_supported_gpu TRUE)
         break()

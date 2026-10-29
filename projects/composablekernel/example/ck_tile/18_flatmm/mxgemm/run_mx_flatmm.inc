@@ -176,6 +176,14 @@ int run_mx_flatmm_with_layouts(const ck_tile::ArgParser& arg_parser,
     a_dev_buf.ToDevice(a_host.data());
     b_shuffled_dev_buf.ToDevice(b_shuffled_host.data());
     c_rslt_host.SetZero();
+    // [WIP diag, issue 509] CK_MX_C_FILL=<byte> pre-fills C on the device. Unset leaves C
+    // uninitialized, as before. A byte that survives in the output means C was not written.
+    if(const char* fill = std::getenv("CK_MX_C_FILL"))
+    {
+        const int byte = static_cast<int>(std::strtol(fill, nullptr, 0));
+        HIP_CHECK_ERROR(hipMemset(c_dev_buf.GetDeviceBuffer(), byte, c_dev_buf.GetBufferSize()));
+        std::cout << "C pre-filled with byte 0x" << std::hex << byte << std::dec << std::endl;
+    }
     scale_a_dev_buf.ToDevice(scale_a_shuffled.data());
     scale_b_dev_buf.ToDevice(scale_b_shuffled.data());
 
